@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,20 +10,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bugzi/gs/internal/ai"
 	"github.com/bugzi/gs/internal/command"
 	"github.com/bugzi/gs/internal/complete"
 	"github.com/bugzi/gs/internal/config"
+	"github.com/bugzi/gs/internal/seaport"
 	"github.com/bugzi/gs/internal/ui"
 	"github.com/bugzi/gs/internal/workspace"
 )
 
 type REPL struct {
-	ws      *workspace.Workspace
-	cfg     *config.Config
-	cmds    []command.Command
-	out     io.Writer
-	mode    string           // "" 主模式；"ai" AI 子模式
-	aiState *command.AIState // AI 会话状态
+	ws         *workspace.Workspace
+	cfg        *config.Config
+	cmds       []command.Command
+	out        io.Writer
+	mode       string             // "" 主模式;"ai" AI 子模式
+	aiState    *command.AIState   // AI 会话状态
+	portRes    chan seaport.Result // seaport 后台导入结果(有任务时非 nil)
+	portCancel context.CancelFunc // 取消后台导入
 }
 
 func New(ws *workspace.Workspace, cfg *config.Config, out io.Writer) *REPL {
@@ -59,6 +64,12 @@ func (r *REPL) banner() {
 // Run 阻塞运行 REPL；返回时用户已退出
 func (r *REPL) Run() error {
 	r.banner()
+	defer func() {
+		if r.portCancel != nil {
+			r.portCancel()
+		}
+	}()
+	r.portCheck()
 	home, _ := os.UserHomeDir()
 	_ = os.MkdirAll(filepath.Join(home, ".gs"), 0o755)
 	hist := LoadHistory(filepath.Join(home, ".gs", "history"))
@@ -81,6 +92,7 @@ func (r *REPL) Run() error {
 			fmt.Fprintln(r.out) // Ctrl-D 换行
 			return nil
 		}
+		r.drainPort()
 		if r.exec(line) {
 			return nil
 		}
@@ -197,6 +209,42 @@ func toCompleteCmds(cmds []command.Command) []complete.Cmd {
 		out = append(out, complete.Cmd{Name: c.Name, Alias: c.Alias, Subs: c.Subs, Hint: hintFor(c.Name)})
 	}
 	return out
+}
+
+// portCheck 启动时检查海港:有待导入文件则后台分类导入,不阻塞进 REPL
+func (r *REPL) portCheck() {
+	_ = seaport.Ensure(r.ws)
+	files, skipped := seaport.Scan(r.ws)
+	if len(skipped) > 0 {
+		fmt.Fprintf(r.out, ui.Dim("seaport 有 %d 个非文本文件未处理(仅支持 .md/.txt)\n"), len(skipped))
+	}
+	if len(files) == 0 {
+		return
+	}
+	fmt.Fprintf(r.out, ui.Dim("seaport 有 %d 个文件,后台导入中…\n"), len(files))
+	var cc seaport.ChatClient
+	if c, err := ai.NewClient(r.cfg); err == nil {
+		c.Temperature = 0 // 分类求稳定,不跟随会话温度
+		cc = c
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.portCancel = cancel
+	r.portRes = make(chan seaport.Result, 1)
+	go func() {
+		r.portRes <- seaport.Import(ctx, r.ws, cc)
+	}()
+}
+
+// drainPort 非阻塞收割后台导入结果;有结果则在提示符前打印
+func (r *REPL) drainPort() {
+	if r.portRes == nil {
+		return
+	}
+	select {
+	case res := <-r.portRes:
+		seaport.Print(r.out, res)
+	default:
+	}
 }
 
 // hintFor 各命令的参数提示（面板顶部灰字）

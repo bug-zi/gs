@@ -141,3 +141,34 @@ func bindList(list *[]string, rel string) {
 	}
 	*list = append(*list, rel)
 }
+
+// SeaList / ShipList / RiverList 绑定数组访问器（MoveTierBinding 的 from/to 参数）
+func SeaList(p *Point) *[]string   { return &p.Sea }
+func ShipList(p *Point) *[]string  { return &p.Ship }
+func RiverList(p *Point) *[]string { return &p.River }
+
+// MoveTierBinding 全树把 from 列表中的 oldRel 迁入 to 列表并更新为 newRel；返回受影响知识点（树序）。
+// from 与 to 为同一访问器时即原地改名。幂等：无命中返回空。
+func (rm *Roadmap) MoveTierBinding(oldRel, newRel string, from, to func(*Point) *[]string) []PointRef {
+	var hits []PointRef
+	for bi := range rm.Branches {
+		for pi := range rm.Branches[bi].Points {
+			p := &rm.Branches[bi].Points[pi]
+			fl, tl := from(p), to(p)
+			idx := -1
+			for i, s := range *fl {
+				if s == oldRel {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				continue
+			}
+			*fl = append((*fl)[:idx], (*fl)[idx+1:]...)
+			bindList(tl, newRel)
+			hits = append(hits, PointRef{bi, pi})
+		}
+	}
+	return hits
+}

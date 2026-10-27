@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bugzi/gs/internal/roadmap"
+	"github.com/bugzi/gs/internal/tier"
 	"github.com/bugzi/gs/internal/ui"
 )
 
@@ -95,6 +96,53 @@ func newSea() Command {
 	})
 }
 
+// runShipMove 大海→船坞命令入口：选择器 → 装船核心 → 打开编辑器
+func runShipMove(ctx *Ctx) error {
+	it, err := pickTierEntryGrouped(ctx, "sea", strings.Join(ctx.Args[1:], " "), "选择要装船（开始加工）的大海条目")
+	if err != nil {
+		return err
+	}
+	dstRel, err := moveToShip(ctx, it.Path)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(ctx.Out, "已装船 %s，开始加工\n", ui.Path(dstRel))
+	return editOpen(ctx, filepath.Join(ctx.WS.Root, filepath.FromSlash(dstRel)))
+}
+
+// moveToShip 装船核心（不含选择器与编辑器，可直测）：移入 ship/ → 绑定迁移 sea[]→ship[] →
+// 出处链改写。统一迁移管线：rename → TOML → 出处链。
+func moveToShip(ctx *Ctx, srcRel string) (string, error) {
+	dstRel := "Study/ship/" + filepath.Base(srcRel)
+	if err := tier.MoveFile(ctx.WS.Root, srcRel, dstRel); err != nil {
+		return "", err
+	}
+	if rm, err := loadRoadmapSoft(ctx); err == nil && rm != nil {
+		if hits := rm.MoveTierBinding(srcRel, dstRel, roadmap.SeaList, roadmap.ShipList); len(hits) > 0 {
+			if err := roadmap.Save(ctx.WS.RoadmapFile(), rm); err != nil {
+				fmt.Fprintln(ctx.Out, ui.Err("绑定落盘失败（文件已移动，可重跑 /ship move 幂等修复）: "+err.Error()))
+			} else {
+				for _, h := range hits {
+					fmt.Fprintf(ctx.Out, "绑定迁移：%s\n", ui.Path(rm.PathOf(h)))
+				}
+			}
+		}
+	}
+	if n, err := tier.RewriteSourceChains(ctx.WS.Root, srcRel, dstRel); err == nil && n > 0 {
+		fmt.Fprintf(ctx.Out, "出处链改写 %d 处\n", n)
+	}
+	return dstRel, nil
+}
+
+func newShip() Command {
+	return newTierCmd("ship", "船坞：加工中条目查阅/装船/入河", []string{"move"}, func(ctx *Ctx, sub string) (bool, error) {
+		if sub == "move" {
+			return true, runShipMove(ctx)
+		}
+		return false, nil
+	})
+}
+
 // askTopic 起主题名：输入框预填默认值
 func askTopic(ctx *Ctx, def string) (string, error) {
 	s, err := inputLine(ctx, "条目主题（回车默认 "+def+"）")
@@ -108,63 +156,108 @@ func askTopic(ctx *Ctx, def string) (string, error) {
 	return s, nil
 }
 
-// runRiverAdd 大海→河流 摘录：选 sea 条目 → 创建预填「出处+全文」的 river 条目 → 打开编辑器
-// （全文摘录=直接保存退出；选段摘录=编辑器内删减后保存）
-func runRiverAdd(ctx *Ctx) error {
-	it, err := pickTierEntryGrouped(ctx, "sea", strings.Join(ctx.Args, " "), "选择要摘录的大海条目")
-	if err != nil {
-		return err
-	}
-	src := it.Path
-	data, err := os.ReadFile(filepath.Join(ctx.WS.Root, filepath.FromSlash(src)))
-	if err != nil {
-		return err
-	}
-	def := strings.TrimSuffix(filepath.Base(src), ".md")
-	topic, err := askTopic(ctx, def)
-	if err != nil {
-		return err
-	}
-	rel, err := CreateEntry(ctx.WS, "river", topic, src, string(data))
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(ctx.Out, "已创建 %s（可在编辑器内删减为选段）\n", ui.Path(rel))
-	// 尾部追问：挂到知识点（可回车跳过）；路线图不存在时静默跳过
-	if rm, err := loadRoadmapSoft(ctx); err == nil && rm != nil {
-		kw, err := inputLine(ctx, "挂到知识点？（输入关键词过滤，回车跳过）")
-		if err == nil {
-			if kw = strings.TrimSpace(kw); kw != "" {
-				matches := rm.MatchPoints(kw)
-				switch {
-				case len(matches) == 0:
-					fmt.Fprintln(ctx.Out, ui.Dim("没有匹配的知识点，未挂载"))
-				case len(matches) == 1:
-					bindAndReport(ctx, rm, matches[0], rel)
-				default:
-					var pick string
-					opts := make([]menuOption, 0, len(matches))
-					for _, m := range matches {
-						opts = append(opts, option(rm.PathOf(m), pointKey(m)))
-					}
-					if err := selectFrom(ctx, "多匹配，挂到哪个知识点？", opts, &pick); err == nil {
-						bindAndReport(ctx, rm, pointParse(pick), rel)
-					}
+// findShipBinding 反查 ship 路径挂在哪个知识点
+func findShipBinding(rm *roadmap.Roadmap, rel string) (roadmap.PointRef, bool) {
+	for bi := range rm.Branches {
+		for pi := range rm.Branches[bi].Points {
+			for _, s := range rm.Branches[bi].Points[pi].Ship {
+				if s == rel {
+					return roadmap.PointRef{Branch: bi, Point: pi}, true
 				}
 			}
 		}
 	}
-	return editOpen(ctx, filepath.Join(ctx.WS.Root, filepath.FromSlash(rel)))
+	return roadmap.PointRef{}, false
 }
 
-// bindAndReport 挂载 river 绑定并落盘汇报
-func bindAndReport(ctx *Ctx, rm *roadmap.Roadmap, ref roadmap.PointRef, rel string) {
-	rm.BindRiver(ref, rel)
-	if err := roadmap.Save(ctx.WS.RoadmapFile(), rm); err != nil {
-		fmt.Fprintln(ctx.Out, ui.Err("绑定落盘失败: "+err.Error()))
-		return
+// askMountPoint 追问挂载知识点（关键词过滤，回车跳过）；多匹配弹选择器。返回是否命中。
+// 命中后由调用方决定绑定写入哪个列表（各层流转语义不同）。
+func askMountPoint(ctx *Ctx, rm *roadmap.Roadmap) (roadmap.PointRef, bool) {
+	kw, err := inputLine(ctx, "挂到知识点？（输入关键词过滤，回车跳过）")
+	if err != nil {
+		return roadmap.PointRef{}, false
 	}
-	fmt.Fprintf(ctx.Out, "已挂到 %s\n", ui.Path(rm.PathOf(ref)))
+	kw = strings.TrimSpace(kw)
+	if kw == "" {
+		return roadmap.PointRef{}, false
+	}
+	matches := rm.MatchPoints(kw)
+	switch {
+	case len(matches) == 0:
+		fmt.Fprintln(ctx.Out, ui.Dim("没有匹配的知识点，未挂载"))
+		return roadmap.PointRef{}, false
+	case len(matches) == 1:
+		return matches[0], true
+	default:
+		var pick string
+		opts := make([]menuOption, 0, len(matches))
+		for _, m := range matches {
+			opts = append(opts, option(rm.PathOf(m), pointKey(m)))
+		}
+		if err := selectFrom(ctx, "多匹配，挂到哪个知识点？", opts, &pick); err != nil {
+			return roadmap.PointRef{}, false
+		}
+		return pointParse(pick), true
+	}
+}
+
+// runRiverMove 船坞→河流命令入口：选择器 → 挂载解析 → riverLanding 核心 → 绑定迁移 → 出处链改写。
+func runRiverMove(ctx *Ctx) error {
+	it, err := pickTierEntryGrouped(ctx, "ship", strings.Join(ctx.Args[1:], " "), "选择要入河（加工完成）的船坞条目")
+	if err != nil {
+		return err
+	}
+	rm, _ := loadRoadmapSoft(ctx)
+	var ref roadmap.PointRef
+	bound := false
+	if rm != nil {
+		ref, bound = findShipBinding(rm, it.Path)
+		if !bound {
+			if r, ok := askMountPoint(ctx, rm); ok {
+				ref, bound = r, true
+			}
+		}
+	}
+	dstRel, err := riverLanding(ctx, rm, it.Path, ref, bound)
+	if err != nil {
+		return err
+	}
+	if bound && rm != nil {
+		rm.MoveTierBinding(it.Path, dstRel, roadmap.ShipList, roadmap.RiverList)
+		if err := roadmap.Save(ctx.WS.RoadmapFile(), rm); err != nil {
+			fmt.Fprintln(ctx.Out, ui.Err("绑定落盘失败（文件已移动）: "+err.Error()))
+		}
+	}
+	if n, err := tier.RewriteSourceChains(ctx.WS.Root, it.Path, dstRel); err == nil && n > 0 {
+		fmt.Fprintf(ctx.Out, "出处链改写 %d 处\n", n)
+	}
+	fmt.Fprintf(ctx.Out, "已入河 %s\n  （原 %s）\n", ui.Path(dstRel), ui.Dim(it.Path))
+	return nil
+}
+
+// riverLanding 入河落点核心（不含选择器/追问/绑定/出处链，可直测）：
+// 已挂载领号改名入河（目标冲突篇序自动顺延）；未挂载（或无路线图）入 99-未挂载收容区不领号。
+func riverLanding(ctx *Ctx, rm *roadmap.Roadmap, srcRel string, ref roadmap.PointRef, bound bool) (string, error) {
+	if !bound || rm == nil {
+		dstRel := "Study/river/99-未挂载/" + filepath.Base(srcRel)
+		return dstRel, tier.MoveFile(ctx.WS.Root, srcRel, dstRel)
+	}
+	b := &rm.Branches[ref.Branch]
+	dirRel := fmt.Sprintf("Study/river/%02d-%s", ref.Branch+1, b.Title)
+	pointNum := ref.Point + 1
+	title := roadmap.StripNumPrefix(filepath.Base(srcRel))
+	dup := roadmap.NextDupSeq(rm.PointAt(ref).River, pointNum)
+	for {
+		dstRel := dirRel + "/" + roadmap.RiverFileName(pointNum, dup, title)
+		err := tier.MoveFile(ctx.WS.Root, srcRel, dstRel)
+		if err == nil {
+			return dstRel, nil
+		}
+		if !strings.Contains(err.Error(), "目标已存在") {
+			return "", err
+		}
+		dup++ // 篇序自动顺延重试
+	}
 }
 
 // runSpringAdd 创建/打开知识点唯一的 spring 总结并绑定：
@@ -235,9 +328,9 @@ func newCode() Command {
 }
 
 func newRiver() Command {
-	return newTierCmd("river", "河流：摘录查阅/新增/编辑", []string{"add"}, func(ctx *Ctx, sub string) (bool, error) {
-		if sub == "add" {
-			return true, runRiverAdd(ctx)
+	return newTierCmd("river", "河流：沉淀查阅/入河/编辑", []string{"move"}, func(ctx *Ctx, sub string) (bool, error) {
+		if sub == "move" {
+			return true, runRiverMove(ctx)
 		}
 		return false, nil
 	})

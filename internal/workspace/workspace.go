@@ -44,6 +44,7 @@ func (w *Workspace) LogsDir() string   { return filepath.Join(w.Root, "Study", "
 func (w *Workspace) SeaDir() string    { return filepath.Join(w.Root, "Study", "sea") }
 func (w *Workspace) RiverDir() string  { return filepath.Join(w.Root, "Study", "river") }
 func (w *Workspace) SpringDir() string { return filepath.Join(w.Root, "Study", "spring") }
+func (w *Workspace) ShipDir() string   { return filepath.Join(w.Root, "Study", "ship") }
 func (w *Workspace) CodeDir() string   { return filepath.Join(w.Root, "Study", "code") }
 func (w *Workspace) PlanDir() string   { return filepath.Join(w.Root, "Study", "plan") }
 func (w *Workspace) StateFile() string {

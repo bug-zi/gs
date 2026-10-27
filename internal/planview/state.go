@@ -18,7 +18,7 @@ type viewKind int
 const (
 	viewGlobal viewKind = iota // 全局树：主干 + 展开的知识点
 	viewBranch                 // 主干页：单主干知识点列表
-	viewPoint                  // 知识点详情：spring/river/sea 清单
+	viewPoint                  // 知识点详情：spring/river/ship/sea 清单
 )
 
 type rowKind int
@@ -124,12 +124,19 @@ func (m *Model) pointRows() []row {
 	} else {
 		rows = append(rows, m.noteRow(p.Code))
 	}
-	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("river · 摘录 ×%d", len(p.River))})
+	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("river · 沉淀 ×%d", len(p.River))})
 	for _, rel := range p.River {
 		rows = append(rows, m.noteRow(rel))
 	}
 	if len(p.River) == 0 {
-		rows = append(rows, row{Kind: rowHint, Text: "  （无；/river add 摘录后可挂载）"})
+		rows = append(rows, row{Kind: rowHint, Text: "  （无；/river move 入河后自动挂载）"})
+	}
+	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("ship · 加工中 ×%d", len(p.Ship))})
+	for _, rel := range p.Ship {
+		rows = append(rows, m.noteRow(rel))
+	}
+	if len(p.Ship) == 0 {
+		rows = append(rows, row{Kind: rowHint, Text: "  （无；/ship move 装船后开始加工）"})
 	}
 	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("sea · 来源 ×%d", len(p.Sea))})
 	for _, rel := range p.Sea {

@@ -9,10 +9,12 @@ import (
 	"github.com/bugzi/gs/internal/workspace"
 )
 
-// TierStats 三层流动统计：出处行反查「未摘录 / 待改写」
+// TierStats 知识流动统计：出处行反查「未摘录 / 待改写」+ 船坞加工中计数
 type TierStats struct {
 	SeaTotal     int
 	SeaUncited   []string // 未被任何 river 条目引用的大海条目
+	ShipTotal    int
+	ShipFiles    []string // 加工中（待入河）
 	RiverTotal   int
 	RiverUncited []string // 未被任何 spring 条目引用的河流条目
 	SpringTotal  int
@@ -59,6 +61,9 @@ func GatherTierStats(ws *workspace.Workspace) TierStats {
 			st.RiverUncited = append(st.RiverUncited, f)
 		}
 	}
+	shipFiles, _ := ListTierFiles(ws, "ship")
+	st.ShipFiles = shipFiles
+	st.ShipTotal = len(shipFiles)
 	springFiles, _ := ListTierFiles(ws, "spring")
 	st.SpringTotal = len(springFiles)
 	return st
@@ -67,11 +72,17 @@ func GatherTierStats(ws *workspace.Workspace) TierStats {
 // renderTierStats 渲染三层概览（本地展示与 AI 提示词共用）
 func renderTierStats(st TierStats) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "三层概览：大海 %d（未摘录 %d）· 河流 %d（待改写 %d）· 泉水 %d\n",
-		st.SeaTotal, len(st.SeaUncited), st.RiverTotal, len(st.RiverUncited), st.SpringTotal)
+	fmt.Fprintf(&b, "知识流动概览：大海 %d（未摘录 %d）· 船坞 %d（加工中）· 河流 %d（待改写 %d）· 泉水 %d\n",
+		st.SeaTotal, len(st.SeaUncited), st.ShipTotal, st.RiverTotal, len(st.RiverUncited), st.SpringTotal)
 	if len(st.SeaUncited) > 0 {
 		b.WriteString("\n大海中尚未摘录的条目：\n")
 		for _, f := range st.SeaUncited {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
+	if st.ShipTotal > 0 {
+		b.WriteString("\n加工中（待入河，/river move 宣告完成）：\n")
+		for _, f := range st.ShipFiles {
 			fmt.Fprintf(&b, "- %s\n", f)
 		}
 	}

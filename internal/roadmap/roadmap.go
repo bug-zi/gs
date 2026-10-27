@@ -31,6 +31,7 @@ type Point struct {
 	Spring string   `toml:"spring,omitempty"`
 	Code   string   `toml:"code,omitempty"`
 	River  []string `toml:"river,omitempty"`
+	Ship   []string `toml:"ship,omitempty"` // 加工中（船坞）；可选字段，缺省空
 	Sea    []string `toml:"sea,omitempty"`
 	Note   string   `toml:"note,omitempty"`
 }

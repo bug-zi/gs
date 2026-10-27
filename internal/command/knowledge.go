@@ -12,6 +12,7 @@ import (
 // tierDirs 层名 → 目录
 var tierDirs = map[string]func(*workspace.Workspace) string{
 	"sea":    (*workspace.Workspace).SeaDir,
+	"ship":   (*workspace.Workspace).ShipDir,
 	"river":  (*workspace.Workspace).RiverDir,
 	"spring": (*workspace.Workspace).SpringDir,
 	"code":   (*workspace.Workspace).CodeDir,
@@ -19,7 +20,7 @@ var tierDirs = map[string]func(*workspace.Workspace) string{
 
 // tierExts 层名 → 条目扩展名（code 层是 .go 演示代码，其余层为 .md 笔记）
 var tierExts = map[string]string{
-	"sea": ".md", "river": ".md", "spring": ".md", "code": ".go",
+	"sea": ".md", "ship": ".md", "river": ".md", "spring": ".md", "code": ".go",
 }
 
 // ListTierFiles 返回指定层（sea/river/spring/code）下全部条目的工作区相对路径（正斜杠），
@@ -48,10 +49,10 @@ func ListTierFiles(ws *workspace.Workspace, tier string) ([]string, error) {
 	return out, err
 }
 
-// ListKnowledge 返回三层知识库全部 .md（sea → river → spring 顺序）
+// ListKnowledge 返回知识库全部 .md（sea → ship → river → spring 顺序）
 func ListKnowledge(ws *workspace.Workspace) ([]string, error) {
 	var out []string
-	for _, tier := range []string{"sea", "river", "spring"} {
+	for _, tier := range []string{"sea", "ship", "river", "spring"} {
 		files, err := ListTierFiles(ws, tier)
 		if err != nil {
 			return nil, err

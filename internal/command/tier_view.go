@@ -35,6 +35,9 @@ func springBinds(p *roadmap.Point) []string {
 
 func riverBinds(p *roadmap.Point) []string { return p.River }
 
+// shipBinds 取知识点 ship 层绑定（加工中条目分组用）
+func shipBinds(p *roadmap.Point) []string { return p.Ship }
+
 // codeBinds 取知识点 code 层绑定（0/1）
 func codeBinds(p *roadmap.Point) []string {
 	if p.Code == "" {
@@ -196,6 +199,8 @@ func pickTierEntryGrouped(ctx *Ctx, tier, kw, label string) (TierItem, error) {
 			binds = springBinds
 		case "code":
 			binds = codeBinds
+		case "ship":
+			binds = shipBinds
 		}
 		groups = buildRoadmapGroups(rm, files, binds, tier)
 	}

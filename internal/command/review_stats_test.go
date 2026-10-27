@@ -44,3 +44,30 @@ func TestRenderTierStats(t *testing.T) {
 		t.Fatalf("render = %s", s)
 	}
 }
+
+func TestGatherTierStatsShip(t *testing.T) {
+	ws := wsForTest(t)
+	mk := func(rel, content string) {
+		p := filepath.Join(ws.Root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("Study/ship/加工一.md", "# a\n")
+	mk("Study/ship/加工二.md", "# b\n")
+
+	st := GatherTierStats(ws)
+	if st.ShipTotal != 2 || len(st.ShipFiles) != 2 {
+		t.Fatalf("ship: total=%d files=%v", st.ShipTotal, st.ShipFiles)
+	}
+	s := renderTierStats(st)
+	if !strings.Contains(s, "船坞 2") {
+		t.Fatalf("概览行缺船坞计数：\n%s", s)
+	}
+	if !strings.Contains(s, "加工中（待入河") {
+		t.Fatal("缺加工中提示段")
+	}
+}

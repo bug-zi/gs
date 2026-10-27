@@ -138,7 +138,9 @@ func newPlan() Command {
 					return runPlanEdit(ctx)
 				case "done", "doing", "todo":
 					return runPlanSetStatus(ctx, ctx.Args[0], strings.Join(ctx.Args[1:], " "))
-				case "add":
+				case "renumber":
+				return runPlanRenumber(ctx)
+			case "add":
 					return runPlanAdd(ctx, ctx.Args[1:])
 				}
 			}

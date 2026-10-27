@@ -722,7 +722,7 @@ func (r *REPL) drainPort() {
 Run: `go build ./... && go test ./internal/repl/ -v`
 Expected: 构建成功,含 TestDrainPort 在内的 repl 测试全部 PASS
 
-- [ ] **Step 5: 手动冒烟(需真实 AI 配置)**
+- [ ] **Step 6: 手动冒烟(需真实 AI 配置)**
 
 1. 向 `D:\Code\Go\seaport\` 放一篇含明确主题的 `.md`(如 Go channel 笔记)
 2. 启动 gs → 应见「seaport 有 1 个文件,后台导入中…」

@@ -10,7 +10,7 @@ brainstorming / 写计划会话产出的**设计记录（spec）与实施计划�
 | 已立项模块 | `docs/project/<模块>/` | `<模块>/2026-10-25-<主题>-design.md` |
 | 跨模块 / 全局改动 | `docs/project/全局/` | `全局/2026-10-25-<主题>-design.md` |
 
-- gs 是单仓库 CLI，功能域按命令划分。现有模块目录：`全局/`（跨模块与整体设计）、`sea/`、`river/`、`spring/`（三层知识体系）、`plan/`、`project/`、`show/`、`ai/`。新功能立项时在 `docs/project/` 下新建对应模块目录，目录随其第一份 design.md 产生，不预建（`notes` 模块已退役，由三层体系接替）。
+- gs 是单仓库 CLI，功能域按命令划分。现有模块目录：`全局/`（跨模块与整体设计）、`sea/`、`river/`、`spring/`、`code/`（四层知识体系）、`plan/`、`project/`、`show/`、`ai/`。新功能立项时在 `docs/project/` 下新建对应模块目录，目录随其第一份 design.md 产生，不预建（`notes` 模块已退役，由三层体系接替）。
 - 文件命名：`YYYY-MM-DD-<主题>-design.md`（spec）、`YYYY-MM-DD-<主题>-plan.md`（plan）；日期前缀保证唯一，**归档不改名**。
 - spec 与 plan 同目录混放（plan 头部 `**Spec:**` 字段互指），不设子分目录。
 - `idea/` 目录维护权属开发者——AI 产出的 spec/plan 存于其中时**只动自己产出的文件**。

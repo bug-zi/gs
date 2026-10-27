@@ -18,8 +18,10 @@ const helpText = `gs · Go 学习工作台
   /plan next "<断点>"     更新学习状态.md 的“下一步”
   /plan done|doing|todo <关键词>  快捷标记知识点（浏览器内 d/s/t 为主路径）
   /plan add branch|point  建树录入（point 全局唯一，可带分组）
+  /plan renumber          按树序全量重排 river 编号（dry-run 预览，确认执行，引用同步改写）
   /sea [关键词]           大海条目查阅；/sea import 整理 inbox，/sea edit 编辑
-  /river [关键词]         河流条目查阅；/river add 摘录（自动带出处），尾部可挂到知识点
+  /ship [关键词]          船坞（加工中）查阅；/ship move 装船开始加工（sea→ship，装船即开编辑器）
+  /river [关键词]         河流条目查阅；/river move 宣告加工完成入河（ship→river，领号挂载）
   /spring [关键词]        泉水查阅；/spring add <知识点> 创建该知识点唯一的总结并绑定
   /code [关键词]          代码查阅；/code add <知识点> 创建该知识点唯一的演示代码并绑定
   /search <关键词>        全局搜索 md 与 go 源码（支持空格分隔多词 AND）
@@ -61,5 +63,5 @@ func newExit() Command {
 
 // Build 全部 M1 命令；后续任务把新命令 append 进来
 func Build() []Command {
-	return []Command{newLogs(), newSea(), newRiver(), newSpring(), newCode(), newPlan(), newSearch(), newShow(), newProject(), newReview(), newAI(), newHelp(), newExit()}
+	return []Command{newLogs(), newSea(), newShip(), newRiver(), newSpring(), newCode(), newPlan(), newSearch(), newShow(), newProject(), newReview(), newAI(), newHelp(), newExit()}
 }

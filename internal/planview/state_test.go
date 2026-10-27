@@ -30,6 +30,7 @@ title = "并发编程"
   [[branch.point]]
   title = "atomic"
   river = ["Study/river/atomic.md"]
+  ship = ["Study/ship/atomic.md"]
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -117,8 +118,8 @@ func TestPointRowsAndOpenNote(t *testing.T) {
 	m := stateFixture(t)
 	m.Branch, m.Point, m.View = 1, 0, viewPoint
 	rows := m.Rows()
-	// spring 小节+提示、code 小节+提示、river 小节+1 条笔记、sea 小节+提示 = 8 行
-	if len(rows) != 8 {
+	// spring 小节+提示、code 小节+提示、river 小节+1 条笔记、ship 小节+1 条笔记、sea 小节+提示 = 10 行
+	if len(rows) != 10 {
 		t.Fatalf("详情页行数 = %d\n%+v", len(rows), rows)
 	}
 	if !strings.Contains(rows[0].Text, "spring") || rows[1].Selectable {
@@ -137,6 +138,41 @@ func TestPointRowsAndOpenNote(t *testing.T) {
 	act, rel := m.Enter()
 	if act != ActOpenNote || rel != "Study/river/atomic.md" {
 		t.Fatalf("act=%d rel=%q", act, rel)
+	}
+}
+
+func TestPointRowsShipSection(t *testing.T) {
+	m := stateFixture(t)
+	m.Branch, m.Point, m.View = 1, 0, viewPoint
+	rows := m.Rows()
+	// 段顺序固定：spring / code / river / ship / sea
+	var heads []string
+	for _, r := range rows {
+		if r.Kind == rowSectionHead {
+			heads = append(heads, r.Text)
+		}
+	}
+	want := []string{"spring", "code", "river", "ship", "sea"}
+	if len(heads) != len(want) {
+		t.Fatalf("小节数 = %d：%+v", len(heads), heads)
+	}
+	for i, w := range want {
+		if !strings.Contains(heads[i], w) {
+			t.Errorf("第 %d 段 = %q, want 含 %q", i, heads[i], w)
+		}
+	}
+	if !strings.Contains(heads[3], "×1") {
+		t.Errorf("ship 段应计 1 篇：%q", heads[3])
+	}
+	// ship 笔记行可选且可打开
+	found := false
+	for _, r := range rows {
+		if r.Kind == rowNote && strings.Contains(r.Text, "Study/ship/atomic.md") {
+			found = r.Selectable
+		}
+	}
+	if !found {
+		t.Fatal("ship 笔记行应可选")
 	}
 }
 
