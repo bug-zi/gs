@@ -16,10 +16,11 @@ import (
 	"github.com/bugzi/gs/internal/ui"
 )
 
-// menuOption 单选项：Label 展示、Value 提交值
+// menuOption 单选项：Label 展示、Value 提交值、Dim 置灰（如 sea 已装船条目，光标行不置灰）
 type menuOption struct {
 	Label string
 	Value string
+	Dim   bool
 }
 
 func option(label, value string) menuOption { return menuOption{Label: label, Value: value} }
@@ -101,9 +102,17 @@ func drawSelectFrame(out io.Writer, title string, opts []menuOption, st *selectS
 			label = runewidth.Truncate(label, width-2, "…")
 		}
 		if i == st.sel {
-			lines = append(lines, "\x1b[7m❯ "+label+"\x1b[27m")
+			text := ui.ANSIBright + label
+			if opts[i].Dim {
+				text = ui.ANSIFaint + label // 已装船条目选中保持灰字，仅微底提示位置
+			}
+			lines = append(lines, ui.ANSIGold+"❯"+ui.ANSIReset+" "+ui.ANSISelBg+text+ui.ANSIReset)
 		} else {
-			lines = append(lines, "  "+label)
+			line := "  " + label
+			if opts[i].Dim {
+				line = "  " + ui.Dim(label)
+			}
+			lines = append(lines, line)
 		}
 	}
 	if hi < len(opts) {
@@ -119,15 +128,24 @@ func drawSelectFrame(out io.Writer, title string, opts []menuOption, st *selectS
 	fmt.Fprintf(out, "%s\x1b[%dA\r", b.String(), 2+len(lines)) // 上移行数 = 标题+提示+选项，差一会使旧帧残留堆叠
 }
 
-// plainSelect 非交互降级：编号列表 + 读行选择
-func plainSelect(ctx *Ctx, title string, opts []menuOption, out *string) error {
+// plainOptionsText 非交互降级编号列表文本；Dim 项同样套阴影色
+func plainOptionsText(title string, opts []menuOption) string {
 	var b strings.Builder
 	b.WriteString(title + "\n")
 	for i, o := range opts {
-		fmt.Fprintf(&b, "  %d. %s\n", i+1, o.Label)
+		label := o.Label
+		if o.Dim {
+			label = ui.Dim(label)
+		}
+		fmt.Fprintf(&b, "  %d. %s\n", i+1, label)
 	}
 	b.WriteString("输入编号选择（空/0 取消）> ")
-	fmt.Fprint(ctx.Out, b.String())
+	return b.String()
+}
+
+// plainSelect 非交互降级：编号列表 + 读行选择
+func plainSelect(ctx *Ctx, title string, opts []menuOption, out *string) error {
+	fmt.Fprint(ctx.Out, plainOptionsText(title, opts))
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return ErrCancelled

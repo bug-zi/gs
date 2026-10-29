@@ -52,6 +52,29 @@ func (c *StructureCache) Find(path string) string {
 	return ""
 }
 
+// Missing 返回 targets 中缓存尚无介绍的节点（保持入参顺序）
+func (c *StructureCache) Missing(targets []Entry) []Entry {
+	var out []Entry
+	for _, t := range targets {
+		if c.Find(t.Rel) == "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// ClearSubtree 删除 prefix 子树的全部缓存条目（含 prefix 自身）；prefix 为空清空全部
+func (c *StructureCache) ClearSubtree(prefix string) {
+	kept := c.Nodes[:0]
+	for _, n := range c.Nodes {
+		if prefix == "" || n.Path == prefix || strings.HasPrefix(n.Path, prefix+"/") {
+			continue
+		}
+		kept = append(kept, n)
+	}
+	c.Nodes = kept
+}
+
 // Merge 合并生成结果（同 path 覆盖），按 path 排序并刷新时间戳
 func (c *StructureCache) Merge(nodes []Node) {
 	m := map[string]string{}

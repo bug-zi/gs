@@ -20,7 +20,17 @@ type AIState struct {
 	Client *ai.Client
 	Hist   []ai.Message
 	System string
-	Saved  bool // 会话已存档过，避免重复询问
+	// AskSea 每轮答毕「添加到 sea」询问注入；nil 用缺省 huh confirm（出错视为 n）
+	AskSea func() bool
+}
+
+// askSea 每轮「添加到 sea」询问
+func (st *AIState) askSea() bool {
+	if st.AskSea != nil {
+		return st.AskSea()
+	}
+	ok, err := confirm(nil, "将本次问答添加到 sea？")
+	return err == nil && ok
 }
 
 var atFileRe = regexp.MustCompile(`@([^\s]+)`)
@@ -108,7 +118,7 @@ func expandAtFile(ws *workspace.Workspace, input string) string {
 	})
 }
 
-// AITurn 一轮 Agent 对话：@文件 展开 → Agent 循环（流式展示/步骤行/写审批）→ 历史只存 user+最终回答
+// AITurn 一轮 Agent 对话：@文件 展开 → Agent 循环（步骤行/写审批）→ 回答整段渲染 → 询问存档入 sea
 func AITurn(ctx *Ctx, st *AIState, input string) error {
 	st.ensureSystem(ctx.WS)
 	user := expandAtFile(ctx.WS, input)
@@ -130,13 +140,12 @@ func AITurn(ctx *Ctx, st *AIState, input string) error {
 		OnToolCall: func(name, argsJSON string) {
 			fmt.Fprintf(ctx.Out, "%s\n", ui.Dim("· "+name+" "+compactArgs(argsJSON)))
 		},
-		OnDelta: func(delta string) { fmt.Fprint(ctx.Out, delta) },
 	})
 	if err != nil {
 		return err
 	}
 	if final.Content != "" {
-		fmt.Fprintln(ctx.Out)
+		fmt.Fprint(ctx.Out, ui.RenderMD(final.Content))
 	}
 	st.Hist = append(st.Hist,
 		ai.Message{Role: "user", Content: user},
@@ -144,7 +153,38 @@ func AITurn(ctx *Ctx, st *AIState, input string) error {
 	if len(st.Hist) > 16 {
 		st.Hist = st.Hist[len(st.Hist)-16:]
 	}
+	if final.Content != "" && st.askSea() {
+		cc := *st.Client
+		cc.Temperature = 0 // 分类要确定性，不用会话温度
+		if err := archiveTurnToSea(ctx, &cc, input, final.Content); err != nil {
+			fmt.Fprintf(ctx.Out, "%s\n", ui.Err(err.Error()))
+		}
+	}
 	return nil
+}
+
+// historyText 把会话历史拼成待渲染 markdown：标题轮数 + 每轮序号问/答
+func historyText(st *AIState) string {
+	var b strings.Builder
+	turns := (len(st.Hist) + 1) / 2
+	fmt.Fprintf(&b, "# 会话回顾 · %d 轮\n\n", turns)
+	for i := 0; i+1 < len(st.Hist); i += 2 {
+		fmt.Fprintf(&b, "## %d. 问\n\n%s\n\n", i/2+1, strings.TrimSpace(st.Hist[i].Content))
+		fmt.Fprintf(&b, "### 答\n\n%s\n\n", strings.TrimSpace(st.Hist[i+1].Content))
+	}
+	return b.String()
+}
+
+// AIHistoryView /his：当前会话往轮全文回顾；空会话提示后返回，非空进整篇直出的翻页视图
+func AIHistoryView(ctx *Ctx, st *AIState) error {
+	if st == nil || len(st.Hist) == 0 {
+		fmt.Fprintln(ctx.Out, ui.Dim("本轮还没有对话"))
+		return nil
+	}
+	return pagerLoop(ctx,
+		func() string { return ui.RenderMD(historyText(st)) },
+		func() (string, bool) { return "", false },
+		pagerFull)
 }
 
 // approveWrite 写文件审批：展示 diff/新建预览后询问；取消（Esc 等）视为拒绝

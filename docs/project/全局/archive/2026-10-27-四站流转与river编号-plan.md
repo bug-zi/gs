@@ -1,10 +1,11 @@
 # 四站流转与 river 编号管理 实施计划
 
-> 状态：**代码已落地（2026-10-27）**——T1-T12 全部完成，全仓 go build + vet + test 19 包全绿；T13 真机冒烟待开发者执行，通过后按机制归档。执行偏差见文末「执行偏差记录」。
+> 状态：**代码已落地（2026-10-27）**——T1-T12 全部完成，全仓 go build + vet + test 19 包全绿；T13 真机冒烟进行中（入口关键词 bug 已修）。
+- 已归档：261027 随 四站流转与river编号 落地（机制判定 build+test 通过即归档，不等冒烟）。执行偏差见文末「执行偏差记录」。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 落地 spec `docs/project/全局/2026-10-27-四站流转与river编号-design.md`——sea→ship→river→spring 四站流转（`/ship move`、`/river move`）+ river 按树序编号与 `/plan renumber` 全量重排。
+**Goal:** 落地 spec `docs/project/全局/archive/2026-10-27-四站流转与river编号-design.md`——sea→ship→river→spring 四站流转（`/ship move`、`/river move`）+ river 按树序编号与 `/plan renumber` 全量重排。
 
 **Architecture:** roadmap 包新增 `Point.Ship` 字段与 `MoveTierBinding` 绑定迁移、renumber 纯函数计划生成；新包 `internal/tier` 承担文件迁移与出处链改写（纯逻辑）；command 层只做选择器/确认/提示装配。流转统一管线：文件 rename → TOML 绑定原子写 → 全库出处链改写。
 

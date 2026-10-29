@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -329,6 +330,34 @@ func parseDescJSON(reply string) ([]structure.Node, error) {
 	return nodes, nil
 }
 
+// filterSubtree 只保留 dir 子树内（含 dir 自身）的节点
+func filterSubtree(entries []structure.Entry, dir string) []structure.Entry {
+	prefix := dir + "/"
+	kept := entries[:0]
+	for _, e := range entries {
+		if e.Rel == dir || strings.HasPrefix(e.Rel, prefix) {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
+// splitBatches 缺失节点按父目录分组；返回自上而下排序的父目录列表与分组映射
+// （字典序即自上而下：父路径是子路径前缀，必排在前）
+func splitBatches(missing []structure.Entry) ([]string, map[string][]structure.Entry) {
+	byDir := map[string][]structure.Entry{}
+	for _, t := range missing {
+		parent := parentDir(t.Rel)
+		byDir[parent] = append(byDir[parent], t)
+	}
+	dirs := make([]string, 0, len(byDir))
+	for d := range byDir {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	return dirs, byDir
+}
+
 // renderTree 当前目录整棵子树的树状文本（纯函数）：多层缩进排版 + 介绍 + 笔记标记。
 // 整体包进代码围栏，防止 markdown 渲染把换行折叠成段落。
 func renderTree(projectName, dir, projectRoot string, exclude []string,
@@ -395,18 +424,24 @@ func indentBlock(s, pad string) string {
 	return strings.Join(lines, "\n")
 }
 
-// showProjectTree 框架树浏览：缓存为空时 AI 逐层生成全部介绍，进入交互树视图
+// showProjectTree 框架树浏览：缓存缺介绍时 AI 按批续生成（断点续传，缓存非空也续），进入交互树视图
 func showProjectTree(ctx *Ctx, p workspace.Project) error {
 	cache, err := structure.LoadStructureCache(structure.StructurePath(ctx.WS, p.Name))
 	if err != nil {
 		fmt.Fprintln(ctx.Out, ui.Err("介绍缓存解析失败，可重新生成覆盖"))
 		cache = &structure.StructureCache{}
 	}
-	if len(cache.Nodes) == 0 && aiConfigured(ctx) {
-		if err := genTreeDescriptions(ctx, p, cache, ""); err != nil {
-			fmt.Fprintln(ctx.Out, ui.Err("AI 生成介绍失败："+err.Error()))
-		} else {
-			fmt.Fprintln(ctx.Out, ui.Dim("已缓存至 "+ctx.WS.Rel(structure.StructurePath(ctx.WS, p.Name))))
+	if aiConfigured(ctx) {
+		if n := len(cache.Missing(structure.CollectTargets(p.Path, ctx.Cfg.Scan.Exclude))); n > 0 {
+			fmt.Fprintln(ctx.Out, ui.Dim(fmt.Sprintf("（续生成介绍… 缺 %d 节点）", n)))
+			failed, err := genTreeDescriptions(ctx, p, cache, "")
+			if err != nil {
+				fmt.Fprintln(ctx.Out, ui.Err("AI 生成介绍失败："+err.Error()))
+			} else if len(failed) > 0 {
+				fmt.Fprintln(ctx.Out, ui.Err(fmt.Sprintf("%d 批介绍生成失败，可按 r 重试", len(failed))))
+			} else {
+				fmt.Fprintln(ctx.Out, ui.Dim("已缓存至 " + ctx.WS.Rel(structure.StructurePath(ctx.WS, p.Name))))
+			}
 		}
 	}
 	return runTreeBrowser(ctx, p, cache)
@@ -446,43 +481,45 @@ func fileActions(ctx *Ctx, p workspace.Project, rel string) error {
 	return nil
 }
 
-// genTreeDescriptions AI 逐层生成 dir 及其全部子目录的节点介绍，逐层并入缓存保存
-func genTreeDescriptions(ctx *Ctx, p workspace.Project, cache *structure.StructureCache, dir string) error {
+// genTreeDescriptions 生成 dir 子树内缺失节点的介绍：按目录分批，只询问缓存缺失者，
+// 单批失败记录后继续其余批次，每批成功即并入缓存保存；返回失败批次目录列表。
+func genTreeDescriptions(ctx *Ctx, p workspace.Project, cache *structure.StructureCache, dir string) ([]string, error) {
 	st, err := ensureAIState(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	type level struct{ abs, rel string }
-	queue := []level{{filepath.Join(p.Path, filepath.FromSlash(dir)), dir}}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		fmt.Fprintln(ctx.Out, ui.Dim("（AI 分析中… "+cur.rel+"）"))
-		entries := structure.Scan(cur.abs, cur.rel, ctx.Cfg.Scan.Exclude)
-		if len(entries) == 0 {
-			continue
+	missing := cache.Missing(structure.CollectTargets(p.Path, ctx.Cfg.Scan.Exclude))
+	if dir != "" {
+		missing = filterSubtree(missing, dir)
+	}
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	dirs, byDir := splitBatches(missing)
+	var failed []string
+	for _, d := range dirs {
+		label := d
+		if label == "" {
+			label = "（根目录）"
 		}
-		nodes, err := genLevelDescriptions(ctx, st, p, cur.rel, entries)
+		fmt.Fprintln(ctx.Out, ui.Dim("（AI 分析中… "+label+"）"))
+		nodes, err := genLevelDescriptions(ctx, st, p, d, byDir[d])
 		if err != nil {
-			return err
+			failed = append(failed, d)
+			continue
 		}
 		cache.Merge(nodes)
 		if err := cache.Save(structure.StructurePath(ctx.WS, p.Name)); err != nil {
-			return err
-		}
-		for _, e := range entries {
-			if e.IsDir {
-				queue = append(queue, level{filepath.Join(p.Path, filepath.FromSlash(e.Rel)), e.Rel})
-			}
+			return failed, err
 		}
 	}
-	return nil
+	return failed, nil
 }
 
 // genLevelDescriptions AI 生成单层各节点的一两句话介绍
 func genLevelDescriptions(ctx *Ctx, st *AIState, p workspace.Project,
 	dir string, entries []structure.Entry) ([]structure.Node, error) {
-	budget := 12000
+	budget := 16000
 	var b strings.Builder
 	for _, e := range entries {
 		fmt.Fprintf(&b, "- %s\n", e.Rel)
@@ -492,7 +529,7 @@ func genLevelDescriptions(ctx *Ctx, st *AIState, p workspace.Project,
 			}
 		}
 	}
-	sys := "你是代码导览助手。根据项目文件清单与文件开头内容，为每个节点写一两句话功能介绍：中文、总共不超过 60 字。只输出 JSON 数组 [{\"path\":\"相对路径\",\"desc\":\"介绍\"}]，path 与清单一致，覆盖每个节点，不要输出其他内容。"
+	sys := "你是代码导览助手。清单即全部待介绍节点：目录按所含内容写概览，.go 文件结合文件开头内容写职责。为每个节点写一两句话功能介绍：中文、不超过 60 字。只输出 JSON 数组 [{\"path\":\"相对路径\",\"desc\":\"介绍\"}]，path 与清单一致，覆盖每个节点，不要输出其他内容。"
 	label := dir
 	if label == "" {
 		label = "（根目录）"

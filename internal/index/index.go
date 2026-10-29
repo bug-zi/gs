@@ -53,6 +53,36 @@ func (ix *Index) Find(name string) *Topic {
 	return nil
 }
 
+// CountPaths 统计指向 paths 集合中路径的 files 条目数
+func (ix *Index) CountPaths(paths map[string]bool) int {
+	n := 0
+	for ti := range ix.Topics {
+		for fi := range ix.Topics[ti].Files {
+			if paths[ix.Topics[ti].Files[fi].Path] {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// PrunePaths 删除指向 paths 集合中路径的 files 条目；返回清除条数（不落盘）
+func (ix *Index) PrunePaths(paths map[string]bool) int {
+	n := 0
+	for ti := range ix.Topics {
+		kept := ix.Topics[ti].Files[:0]
+		for _, f := range ix.Topics[ti].Files {
+			if paths[f.Path] {
+				n++
+				continue
+			}
+			kept = append(kept, f)
+		}
+		ix.Topics[ti].Files = kept
+	}
+	return n
+}
+
 // Save 目录不存在则创建，原子写
 func (ix *Index) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

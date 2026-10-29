@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/bugzi/gs/internal/ui"
 )
 
 var ansiRe = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
@@ -33,8 +35,8 @@ func TestWindow(t *testing.T) {
 func TestRenderRowCursor(t *testing.T) {
 	r := row{Kind: rowPoint, Selectable: true, Text: "  [ ] 变量与常量"}
 	sel := renderRow(r, true, 80)
-	if !strings.HasPrefix(sel, "\x1b[7m") || !strings.HasSuffix(sel, "\x1b[27m") {
-		t.Fatalf("光标行应反白: %q", sel)
+	if !strings.Contains(sel, ui.ANSISelBg) || !strings.Contains(sel, ui.ANSIBright) {
+		t.Fatalf("光标行应微底亮字: %q", sel)
 	}
 	head := renderRow(row{Kind: rowGroupHead, Text: "语法核心"}, false, 80)
 	if !strings.Contains(head, "语法核心") {
@@ -43,6 +45,39 @@ func TestRenderRowCursor(t *testing.T) {
 	hint := renderRow(row{Kind: rowHint, Text: "  （无）"}, false, 80)
 	if !strings.Contains(stripANSI(hint), "（无）") {
 		t.Fatalf("提示行渲染: %q", hint)
+	}
+}
+
+// TestRenderRowTierColor 层小节标题带层色加粗；无层标题仍为纯加粗
+func TestRenderRowTierColor(t *testing.T) {
+	head := renderRow(row{Kind: rowSectionHead, Tier: TierShip, Text: "ship · 加工中 ×1"}, false, 80)
+	if !strings.Contains(head, ui.ANSIShip) || !strings.Contains(head, "\x1b[1m") {
+		t.Fatalf("ship 小节标题应赭色加粗: %q", head)
+	}
+	plain := renderRow(row{Kind: rowGroupHead, Text: "语法核心"}, false, 80)
+	if strings.Contains(plain, "\x1b[38;5;") {
+		t.Fatalf("无层分组标题不应着色: %q", plain)
+	}
+}
+
+// TestRenderRowDimNote 装船灰显笔记行走弱化渲染；选中仍微底提示位置但保持灰字不亮白
+func TestRenderRowDimNote(t *testing.T) {
+	r := row{Kind: rowNote, Tier: TierSea, Dim: true, Selectable: true, Text: "  已装船.md"}
+	dim := renderRow(r, false, 80)
+	if !strings.Contains(dim, ui.Dim("  已装船.md")) {
+		t.Fatalf("已消费笔记行应与提示行同款灰显: %q", dim)
+	}
+	sel := renderRow(r, true, 80)
+	if !strings.Contains(sel, ui.ANSISelBg) || !strings.Contains(sel, ui.ANSIFaint) {
+		t.Fatalf("已消费行选中应微底且保持灰字: %q", sel)
+	}
+	if strings.Contains(sel, ui.ANSIBright) {
+		t.Fatalf("已消费行选中不应亮白高亮: %q", sel)
+	}
+	plain := row{Kind: rowNote, Tier: TierSea, Selectable: true, Text: "  新材料.md"}
+	selPlain := renderRow(plain, true, 80)
+	if !strings.Contains(selPlain, ui.ANSIBright) {
+		t.Fatalf("未加工行选中应保持亮白: %q", selPlain)
 	}
 }
 
@@ -68,8 +103,8 @@ func TestViewHint(t *testing.T) {
 		t.Fatalf("全局树提示应含 Tab: %q", h)
 	}
 	m.View = viewPoint
-	if h := viewHint(m); !strings.Contains(h, "d/s/t") {
-		t.Fatalf("详情页提示应含 d/s/t: %q", h)
+	if h := viewHint(m); !strings.Contains(h, "d/s/t") || !strings.Contains(h, "c 装船") || !strings.Contains(h, "r 入河") {
+		t.Fatalf("详情页提示应含 d/s/t 与 c 装船、r 入河: %q", h)
 	}
 }
 

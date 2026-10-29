@@ -26,15 +26,23 @@ func window(n, cur, avail int) (lo, hi int) {
 	return lo, lo + avail
 }
 
-// renderRow 单行渲染：超宽截断；光标行整行反白；小标题加粗；提示行灰
+// renderRow 单行渲染：超宽截断；光标行微底亮字；小节标题按层着色加粗；装船笔记行灰；提示行灰
 func renderRow(r row, selected bool, width int) string {
 	if runewidth.StringWidth(r.Text) > width {
 		r.Text = runewidth.Truncate(r.Text, width, "…")
 	}
 	switch {
+	case selected && r.Kind == rowNote && r.Dim:
+		// 已消费行被选中：保持灰字，仅微底提示位置，与未加工行的亮白选中区分
+		return ui.ANSISelBg + ui.ANSIFaint + r.Text + ui.ANSIReset
 	case selected:
-		return "\x1b[7m" + r.Text + "\x1b[27m"
-	case r.Kind == rowGroupHead || r.Kind == rowSectionHead:
+		return ui.ANSISelBg + ui.ANSIBright + r.Text + ui.ANSIReset
+	case r.Kind == rowNote && r.Dim:
+		return ui.Dim(r.Text) // 与键位提示行同款弱化：已装船/入河，出处已消费
+	case r.Kind == rowGroupHead || r.Kind == rowSectionHead || r.Kind == rowUnboundHead:
+		if c := r.Tier.Color(); c != "" {
+			return c + "\x1b[1m" + r.Text + "\x1b[22m\x1b[0m"
+		}
 		return "\x1b[1m" + r.Text + "\x1b[22m"
 	case r.Kind == rowHint:
 		return ui.Dim(r.Text)
@@ -61,6 +69,12 @@ func viewTitle(m *Model) string {
 		b := &m.RM.Branches[m.Branch]
 		done, total := m.progress(m.Branch)
 		return fmt.Sprintf("\x1b[1m%s\x1b[22m　%d/%d", b.Title, done, total)
+	case viewUnbound:
+		n := 0
+		for _, t := range tierOrder {
+			n += len(m.unboundCache[t])
+		}
+		return fmt.Sprintf("\x1b[1m待归类区\x1b[22m　未挂载 %d", n)
 	default:
 		p := m.curPoint()
 		return fmt.Sprintf("\x1b[1m%s\x1b[22m　%s　%s", p.Title, roadmap.Glyph(p.Status), m.RM.PathOf(roadmap.PointRef{Branch: m.Branch, Point: m.Point}))
@@ -71,11 +85,13 @@ func viewTitle(m *Model) string {
 func viewHint(m *Model) string {
 	switch m.View {
 	case viewGlobal:
-		return ui.Dim("↑↓/jk 移动　Tab 展开/收起　Enter 进入　d/s/t 标记　Esc/q 退出")
+		return ui.Dim("↑↓/jk 移动　Tab 展开/收起　Enter 进入　n 改名　o 操作　d/s/t 标记　Esc/q 退出")
 	case viewBranch:
-		return ui.Dim("↑↓/jk 移动　Enter 看笔记　d/s/t 标记　Esc 返回　q 退出")
+		return ui.Dim("↑↓/jk 移动　Enter 看笔记　n 改名　o 操作　d/s/t 标记　Esc 返回　q 退出")
+	case viewUnbound:
+		return ui.Dim("↑↓ 选择　Enter/o 打开　a 挂载到知识点　Esc 返回　q 退出")
 	default:
-		return ui.Dim("↑↓ 选笔记　Enter/o 打开　d/s/t 标记状态　Esc 返回　q 退出")
+		return ui.Dim("↑↓ 选笔记　Enter/o 打开　x 卸载　m 移动　a 挂载　c 装船　r 入河　d/s/t 标记　Esc 返回　q 退出")
 	}
 }
 

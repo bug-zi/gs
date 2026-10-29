@@ -37,7 +37,7 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{
 		Scan: Scan{
-			Exclude:   []string{".git", ".codegraph", ".agents", "Resource", "node_modules", "_docx_render"},
+			Exclude:   []string{".git", ".codegraph", ".agents", ".gs", "Resource", "node_modules", "_docx_render"},
 			MaxFileKB: 512,
 		},
 		Project: Project{Opener: ""}, // 空 = 跟随 [ui] editor 解析链（trae 默认值曾指向失效的包装脚本）

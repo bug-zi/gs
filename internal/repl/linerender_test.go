@@ -63,12 +63,25 @@ func TestBuildPanelLines(t *testing.T) {
 	if !strings.Contains(lines[0], "<关键词|日期>") {
 		t.Fatalf("首行应为提示: %q", lines[0])
 	}
-	if !strings.Contains(lines[2], "❯ edit") {
+	if !strings.Contains(lines[2], "❯") || !strings.Contains(lines[2], "edit") {
 		t.Fatalf("高亮项: %q", lines[2])
+	}
+	if !strings.Contains(lines[2], "\x1b[48;5;236m") || !strings.Contains(lines[2], "\x1b[38;5;220m") {
+		t.Fatalf("选中行应含微底与金箭头: %q", lines[2])
 	}
 	plain := stripANSI(strings.Join(lines, "\n"))
 	if strings.Contains(plain, "❯ add") {
 		t.Fatal("未选中项不应有 ❯")
+	}
+}
+
+func TestPlainWidth(t *testing.T) {
+	colored := "\x1b[38;5;220m\x1b[1mgs\x1b[0m \x1b[38;5;240m❯\x1b[0m "
+	if got := plainWidth(colored); got != 5 {
+		t.Fatalf("plainWidth(带色提示符) = %d, want 5", got)
+	}
+	if got := plainWidth("gs> "); got != 4 {
+		t.Fatalf("plainWidth(素提示符) = %d, want 4", got)
 	}
 }
 

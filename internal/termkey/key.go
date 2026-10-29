@@ -13,12 +13,15 @@ type KeyReader struct {
 	parser Parser
 }
 
-// NewKeyReader 进入原始输入模式；失败（如 stdin 非终端）返回 error，调用方自行降级
+// NewKeyReader 进入原始输入模式；失败（如 stdin 非终端）返回 error，调用方自行降级。
+// 成功后清一次输入缓冲：上个会话（bubbletea 编辑器退出不清缓冲、连按 Esc 的残留）
+// 漏下的字节会被误当首键——一个残留 Esc 就会让交互视图瞬间退出。
 func NewKeyReader() (*KeyReader, error) {
 	raw, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		return nil, err
 	}
+	DrainConsoleInput()
 	return &KeyReader{raw: raw}, nil
 }
 

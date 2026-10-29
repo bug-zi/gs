@@ -35,15 +35,15 @@ func New(ws *workspace.Workspace, cfg *config.Config, out io.Writer) *REPL {
 }
 
 func (r *REPL) banner() {
-	fmt.Fprintf(r.out, "gs · Go 学习工作台 · %s\n", r.ws.Root)
+	fmt.Fprintf(r.out, "%s %s Go 学习工作台 %s %s\n", ui.Gold("gs"), ui.Dim("·"), ui.Dim("·"), ui.Dim(r.ws.Root))
 	data, _ := os.ReadFile(r.ws.StateFile())
 	st := command.ParseState(string(data))
 	for _, kv := range st.Breakpoints {
 		switch kv.Key {
 		case "当前优先模块":
-			fmt.Fprintf(r.out, "当前断点: %s\n", kv.Value)
+			fmt.Fprintf(r.out, "%s %s\n", ui.Label("当前断点:"), kv.Value)
 		case "目标":
-			fmt.Fprintf(r.out, "目标: %s\n", kv.Value)
+			fmt.Fprintf(r.out, "%s %s\n", ui.Label("目标:"), kv.Value)
 		}
 	}
 	if dates, err := r.ws.ListLogs(); err == nil && len(dates) > 0 {
@@ -53,7 +53,7 @@ func (r *REPL) banner() {
 		if last.Format("20060102") == today.Format("20060102") {
 			tag = " (今天)"
 		}
-		fmt.Fprintf(r.out, "上次学习: %s%s · 连续 %d 天\n", last.Format("01-02"), tag, r.ws.Streak())
+		fmt.Fprintf(r.out, "%s %s%s · 连续 %d 天\n", ui.Label("上次学习"), last.Format("01-02"), tag, r.ws.Streak())
 	}
 	fmt.Fprintln(r.out, ui.Dim("输入 /help 查看命令；/ 即弹候选，Tab/→ 接受灰色建议，↑↓ 历史，/exit 退出"))
 	if n := command.InboxCount(r.ws); n > 0 {
@@ -73,13 +73,15 @@ func (r *REPL) Run() error {
 	home, _ := os.UserHomeDir()
 	_ = os.MkdirAll(filepath.Join(home, ".gs"), 0o755)
 	hist := LoadHistory(filepath.Join(home, ".gs", "history"))
-	reader := NewReader("gs> ", complete.BuildTree(toCompleteCmds(r.cmds)), hist)
+	// 面板按使用频率排序：启动时以历史统计重排一次，会话内顺序冻结不跳动
+	cmds := sortCmdsByFreq(r.cmds, freqFromHistory(hist.Items(), r.cmds))
+	reader := NewReader("gs> ", complete.BuildTree(toCompleteCmds(cmds)), hist)
 	defer reader.Close()
 	for {
 		if r.mode == "ai" {
-			reader.SetPrompt("ai> ")
+			reader.SetPrompt("ai ❯ ")
 		} else {
-			reader.SetPrompt("gs> ")
+			reader.SetPrompt("gs ❯ ")
 		}
 		line, err := reader.Read()
 		if errors.Is(err, ErrEscBack) {
@@ -114,13 +116,8 @@ func (r *REPL) aiChat(input string) {
 	}
 }
 
-// backFromAI 返回主模式；有未存档会话时询问存档（Esc 与 /back 共用）
+// backFromAI 返回主模式（Esc 与 /back 共用）
 func (r *REPL) backFromAI() {
-	ctx := r.newCtx(nil)
-	ctx.AI = r.aiState
-	if err := command.MaybeSaveAIChat(ctx); err != nil {
-		fmt.Fprintln(r.out, ui.Err("错误: "+err.Error()))
-	}
 	r.mode = ""
 	fmt.Fprintln(r.out, ui.Dim("已返回主模式"))
 }
@@ -146,6 +143,14 @@ func (r *REPL) exec(line string) bool {
 		switch name {
 		case "back":
 			r.backFromAI()
+		case "his":
+			if r.aiState == nil {
+				fmt.Fprintln(r.out, ui.Err("AI 未初始化，请先执行 /AI"))
+				return false
+			}
+			if err := command.AIHistoryView(r.newCtx(nil), r.aiState); err != nil {
+				fmt.Fprintln(r.out, ui.Err("错误: "+err.Error()))
+			}
 		case "save":
 			if r.aiState == nil {
 				fmt.Fprintln(r.out, ui.Err("AI 未初始化，请先执行 /AI"))
@@ -156,15 +161,12 @@ func (r *REPL) exec(line string) bool {
 				fmt.Fprintln(r.out, ui.Err("错误: "+err.Error()))
 				return false
 			}
-			fmt.Fprintf(r.out, "已存档 %s（/sea 可查阅）\n", path)
+			fmt.Fprintf(r.out, "%s %s（/sea 可查阅）\n", ui.OK("已存档"), path)
 		case "exit", "q", "quit":
-			ctx := r.newCtx(nil)
-			ctx.AI = r.aiState
-			_ = command.MaybeSaveAIChat(ctx)
 			fmt.Fprintln(r.out, "再见，学习顺利。")
 			return true
 		default:
-			fmt.Fprintln(r.out, ui.Dim("AI 模式：直接输入问题，/save 存档，/back 或 Esc 返回主模式"))
+			fmt.Fprintln(r.out, ui.Dim("AI 模式：直接输入问题，/his 回顾历史，/save 存档，/back 或 Esc 返回主模式"))
 		}
 		return false
 	}

@@ -33,7 +33,7 @@ func Glyph(status string) string {
 }
 
 // Render 静态树：主干行挂 done/total（空主干不挂）；分组标签变化时输出小标题行；
-// 「高频」尾随 *；主干过滤只输出指定主干。
+// 主干过滤只输出指定主干。
 func Render(rm *Roadmap, o RenderOpts) string {
 	var b strings.Builder
 	if o.Progress != "" {
@@ -78,9 +78,6 @@ func Render(rm *Roadmap, o RenderOpts) string {
 				ng = "└─ "
 			}
 			nl := bc + "   " + ng + Glyph(p.Status) + " " + p.Title
-			if hasHighFreq(p.Tags) {
-				nl += " *"
-			}
 			if o.Color != nil {
 				nl = o.Color(p.Status, nl)
 			}
@@ -99,12 +96,3 @@ func leaderLine(title, progress string, w int) string {
 	return title + " " + strings.Repeat("·", dots) + " " + progress
 }
 
-// hasHighFreq tags 含「高频」即视为高频
-func hasHighFreq(tags []string) bool {
-	for _, tg := range tags {
-		if strings.Contains(tg, "高频") {
-			return true
-		}
-	}
-	return false
-}

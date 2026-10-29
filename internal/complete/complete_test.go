@@ -39,3 +39,26 @@ func TestFor(t *testing.T) {
 		}
 	}
 }
+
+func TestForSingle(t *testing.T) {
+	cases := []struct {
+		name       string
+		line       string
+		wantSingle string
+		wantHint   string
+	}{
+		{"精确命中", "/sea", "sea", "<关键词>"},
+		{"前缀唯一带ghost", "/se", "sea", "<关键词>"},
+		{"别名让位于命令名", "/log", "logs", "<关键词|日期>"},
+		{"大小写唯一", "/SEA", "sea", "<关键词>"},
+		{"多候选仅裸斜杠", "/", "", ""},
+		{"零命中", "/zz", "", ""},
+		{"二词阶段无Single", "/sea e", "", ""},
+	}
+	for _, tc := range cases {
+		got := For(testTree, tc.line)
+		if got.Single != tc.wantSingle || got.SingleHint != tc.wantHint {
+			t.Errorf("%s: For(%q) Single=%q SingleHint=%q, want %q/%q", tc.name, tc.line, got.Single, got.SingleHint, tc.wantSingle, tc.wantHint)
+		}
+	}
+}

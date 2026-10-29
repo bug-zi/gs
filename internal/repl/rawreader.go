@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bugzi/gs/internal/complete"
 	"github.com/bugzi/gs/internal/termkey"
-	"github.com/mattn/go-runewidth"
+	"github.com/bugzi/gs/internal/ui"
 	"golang.org/x/term"
 )
 
@@ -20,17 +22,35 @@ var ErrEscBack = errors.New("esc back")
 // 终端状态进出完全由本文件负责，无任何框架接管，规避 bubbletea 帧生命周期与
 // 普通输出交错的兼容性问题（trae/VSCode 终端实测多次失败后重写）。
 type rawReader struct {
-	prompt   string
-	tree     complete.Tree
-	hist     *History
-	fallback Reader
+	prompt     string
+	promptName string // 素文本首词（gs/ai），供 Esc 返回判定
+	tree       complete.Tree
+	hist       *History
+	fallback   Reader
 }
 
 func newRawReader(prompt string, tree complete.Tree, hist *History) *rawReader {
-	return &rawReader{prompt: prompt, tree: tree, hist: hist}
+	p, name := brandPrompt(prompt)
+	return &rawReader{prompt: p, promptName: name, tree: tree, hist: hist}
 }
 
-func (r *rawReader) SetPrompt(p string) { r.prompt = p }
+func (r *rawReader) SetPrompt(p string) {
+	r.prompt, r.promptName = brandPrompt(p)
+}
+
+// brandPrompt 提示符品牌色：gs 金粗、ai 赭粗，其余（箭头段）暗灰；返回带色串与素文本首词
+func brandPrompt(p string) (string, string) {
+	i := strings.Index(p, " ")
+	if i <= 0 {
+		return p, p
+	}
+	name, rest := p[:i], p[i:]
+	color := ui.ANSIGold
+	if name == "ai" {
+		color = ui.ANSIOchreBold
+	}
+	return color + name + ui.ANSIReset + ui.ANSIIdle + rest + ui.ANSIReset, name
+}
 func (r *rawReader) Close() error       { return nil }
 
 func (r *rawReader) Read() (string, error) {
@@ -43,22 +63,38 @@ func (r *rawReader) Read() (string, error) {
 		r.fallback = newPlainReader(r.prompt)
 		return r.fallback.Read()
 	}
+	// 入口清一次输入缓冲：上个 TUI（尤其 bubbletea 系，退出不清缓冲）或快速连按
+	// Esc 逐层退出漏下的残留 0x1b 会被当作首键 Esc，把候选面板压制成整个会话不弹
+	termkey.DrainConsoleInput()
 	defer func() {
 		_ = term.Restore(int(os.Stdin.Fd()), raw)
 		termkey.DrainConsoleInput()
 	}()
 
 	st := NewLineState()
+	var res complete.Result
 	var ghost, hint string
 	var cands []string
 	panel, sel, noPanel := false, -1, false
 	histIdx, typed := -1, ""
 
-	// draw 重绘整个帧：清输入行及下方旧内容 → 输入行 → 面板 → 光标复位。
+	var mu sync.Mutex // 守护以下状态与重绘：定时器回调与主循环并发触达
+	var hintTimer *time.Timer
+	var hintText string // 非空 = 输入行下方延迟提示显示中
+
+	stopHint := func() {
+		if hintTimer != nil {
+			hintTimer.Stop()
+			hintTimer = nil
+		}
+		hintText = ""
+	}
+
+	// drawLocked 重绘整个帧（须持 mu）：清输入行及下方旧内容 → 输入行 → 面板/延迟提示 → 光标复位。
 	// 输入行经水平滚动窗口裁剪，保证永不超出终端宽度（超出会换行、
 	// 换行后 \x1b[J 清不掉上方旧行，导致每键重打全文的叠影）。
-	draw := func() {
-		res := complete.For(r.tree, st.Text())
+	drawLocked := func() {
+		res = complete.For(r.tree, st.Text())
 		ghost, hint, cands = res.Ghost, res.Hint, res.Candidates
 		panel = len(cands) >= 2 && !noPanel
 		if !panel {
@@ -69,8 +105,10 @@ func (r *rawReader) Read() (string, error) {
 		var lines []string
 		if panel {
 			lines = buildPanelLines(cands, hint, sel)
+		} else if hintText != "" {
+			lines = []string{"  " + ui.ANSIIdle + ui.ANSIItalic + hintText + ui.ANSIReset} // 延迟提示：斜体暗灰
 		}
-		avail := terminalWidth() - runewidth.StringWidth(r.prompt) - 1
+		avail := terminalWidth() - plainWidth(r.prompt) - 1
 		line, curCol := buildInputLineFit(r.prompt, st, ghost, avail)
 		var b strings.Builder
 		b.WriteString("\r\x1b[J")
@@ -84,6 +122,26 @@ func (r *rawReader) Read() (string, error) {
 		}
 		fmt.Fprintf(&b, "\r\x1b[%dC", curCol)
 		os.Stdout.WriteString(b.String())
+	}
+
+	// settle 每轮按键后的收尾（须持 mu）：清提示与定时器 → 重绘 → 唯一命中且面板未弹时设 1s 定时器
+	settle := func() {
+		stopHint()
+		drawLocked()
+		text := delayedHintText(res.Single, res.SingleHint)
+		if text == "" || noPanel {
+			return
+		}
+		line := st.Text()
+		hintTimer = time.AfterFunc(time.Second, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if st.Text() != line || noPanel { // 行已变或 Esc 压制面板：放弃
+				return
+			}
+			hintText = text
+			drawLocked()
+		})
 	}
 
 	histMove := func(delta int) {
@@ -114,15 +172,21 @@ func (r *rawReader) Read() (string, error) {
 	}
 
 	var parser termkey.Parser
-	draw()
+	mu.Lock()
+	drawLocked()
+	mu.Unlock()
 	buf := make([]byte, 256)
 	for {
 		n, err := os.Stdin.Read(buf)
 		if err != nil {
+			mu.Lock()
+			stopHint()
+			mu.Unlock()
 			return finishRead(r, st)
 		}
 		chunk := buf[:n]
 		keys := parser.Feed(chunk)
+		mu.Lock()
 		for _, key := range keys {
 			switch key.Kind {
 			case termkey.KindRune:
@@ -148,8 +212,10 @@ func (r *rawReader) Read() (string, error) {
 					st.InsertText(ghost)
 				}
 			case termkey.KindEsc:
-				if strings.HasPrefix(r.prompt, "ai") {
-					os.Stdout.WriteString("\r\x1b[J\r\n") // 清输入帧（面板+ghost）后交还普通终端
+				if r.promptName == "ai" {
+					os.Stdout.WriteString("\r\x1b[J\r\n") // 清输入帧（面板+ghost+提示）后交还普通终端
+					stopHint()
+					mu.Unlock()
 					return "", ErrEscBack
 				}
 				noPanel = true
@@ -161,24 +227,20 @@ func (r *rawReader) Read() (string, error) {
 			case termkey.KindCtrlD:
 				if st.Len() == 0 {
 					os.Stdout.WriteString("\r\x1b[J\r\n")
+					stopHint()
+					mu.Unlock()
 					return "", io.EOF
 				}
 				st.Delete()
 			case termkey.KindUp:
 				if panel && len(cands) > 0 {
-					if sel < 0 {
-						sel = 0
-					} else if sel > 0 {
-						sel--
-					}
+					sel = wrapSel(sel, -1, len(cands))
 				} else {
 					histMove(-1)
 				}
 			case termkey.KindDown:
 				if panel && len(cands) > 0 {
-					if sel < len(cands)-1 {
-						sel++
-					}
+					sel = wrapSel(sel, 1, len(cands))
 				} else {
 					histMove(1)
 				}
@@ -187,14 +249,17 @@ func (r *rawReader) Read() (string, error) {
 					st = FromText(acceptCandidateText(st.Text(), cands[sel]))
 					st.Pos = st.Len()
 					noPanel, sel = false, -1
-					draw()
+					drawLocked()
 					continue
 				}
+				stopHint()
 				r.hist.Add(st.Text())
+				mu.Unlock()
 				return finishRead(r, st)
 			}
 		}
-		draw()
+		settle()
+		mu.Unlock()
 	}
 }
 
@@ -225,4 +290,34 @@ func acceptCandidateText(line, cand string) string {
 		return line[:i+1] + cand
 	}
 	return "/" + cand
+}
+
+// delayedHintText 延迟提示行内容：命令名 + 参数提示；任一为空则不显示
+func delayedHintText(single, singleHint string) string {
+	if single == "" || singleHint == "" {
+		return ""
+	}
+	return single + " " + singleHint
+}
+
+// wrapSel 面板选中项循环移动：↑ 在首行回绕到末行，↓ 在末行回绕到首行；
+// 未选中（-1）时就近进入列表第一行；n<=0 无候选维持未选中
+func wrapSel(sel, delta, n int) int {
+	if n <= 0 {
+		return -1
+	}
+	if delta < 0 {
+		switch {
+		case sel < 0:
+			return 0
+		case sel == 0:
+			return n - 1
+		default:
+			return sel - 1
+		}
+	}
+	if sel >= n-1 {
+		return 0
+	}
+	return sel + 1
 }

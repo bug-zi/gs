@@ -46,7 +46,7 @@ func runSeaImport(ctx *Ctx) error {
 		if err := os.Rename(src, dst); err != nil {
 			return err
 		}
-		fmt.Fprintf(ctx.Out, "已导入 %s\n", ui.Path(ctx.WS.Rel(dst)))
+		fmt.Fprintf(ctx.Out, "%s %s\n", ui.OK("已导入"), ui.Path(ctx.WS.Rel(dst)))
 		n++
 	}
 	if n == 0 {
@@ -60,7 +60,7 @@ func runSeaImport(ctx *Ctx) error {
 // newTierCmd 生成三层命令的板块化入口：默认查阅、edit 编辑、extraSubs 各自特例（add/import）优先。
 // 条目按板块分组选择（spring/river 按 roadmap 主干、sea 按一级子目录），关键词平铺直选。
 func newTierCmd(name, short string, extraSubs []string, extra func(ctx *Ctx, sub string) (bool, error)) Command {
-	subs := append([]string{"edit"}, extraSubs...)
+	subs := append([]string{"edit", "del"}, extraSubs...)
 	return Command{
 		Name:  name,
 		Short: short,
@@ -69,6 +69,9 @@ func newTierCmd(name, short string, extraSubs []string, extra func(ctx *Ctx, sub
 			if len(ctx.Args) > 0 {
 				if handled, err := extra(ctx, ctx.Args[0]); handled || err != nil {
 					return err
+				}
+				if ctx.Args[0] == "del" {
+					return runTierDel(ctx, name, strings.Join(ctx.Args[1:], " "))
 				}
 				if ctx.Args[0] == "edit" {
 					it, err := pickTierEntryGrouped(ctx, name, strings.Join(ctx.Args[1:], " "), "选择要编辑的条目")
@@ -96,8 +99,8 @@ func newSea() Command {
 	})
 }
 
-// runShipMove 大海→船坞命令入口：选择器 → 装船核心 → 打开编辑器
-func runShipMove(ctx *Ctx) error {
+// runShipCopy 装船命令入口（/ship copy）：选择器 → 装船核心 → 打开编辑器
+func runShipCopy(ctx *Ctx) error {
 	it, err := pickTierEntryGrouped(ctx, "sea", strings.Join(ctx.Args[1:], " "), "选择要装船（开始加工）的大海条目")
 	if err != nil {
 		return err
@@ -110,34 +113,35 @@ func runShipMove(ctx *Ctx) error {
 	return editOpen(ctx, filepath.Join(ctx.WS.Root, filepath.FromSlash(dstRel)))
 }
 
-// moveToShip 装船核心（不含选择器与编辑器，可直测）：移入 ship/ → 绑定迁移 sea[]→ship[] →
-// 出处链改写。统一迁移管线：rename → TOML → 出处链。
+// moveToShip 装船核心（不含选择器与编辑器，可直测）：复制入 ship/（sea 原件与其绑定原样保留）→
+// 绑定复制 sea[]→ship[]。装船不动 sea、不改写出处链；ship→river 才是真实迁移。
 func moveToShip(ctx *Ctx, srcRel string) (string, error) {
 	dstRel := "Study/ship/" + filepath.Base(srcRel)
-	if err := tier.MoveFile(ctx.WS.Root, srcRel, dstRel); err != nil {
+	if err := tier.CopyFile(ctx.WS.Root, srcRel, dstRel); err != nil {
 		return "", err
 	}
 	if rm, err := loadRoadmapSoft(ctx); err == nil && rm != nil {
-		if hits := rm.MoveTierBinding(srcRel, dstRel, roadmap.SeaList, roadmap.ShipList); len(hits) > 0 {
+		if hits := rm.CopyTierBinding(srcRel, dstRel, roadmap.SeaList, roadmap.ShipList); len(hits) > 0 {
 			if err := roadmap.Save(ctx.WS.RoadmapFile(), rm); err != nil {
-				fmt.Fprintln(ctx.Out, ui.Err("绑定落盘失败（文件已移动，可重跑 /ship move 幂等修复）: "+err.Error()))
+				fmt.Fprintln(ctx.Out, ui.Err("绑定落盘失败（文件已复制，可重跑 /ship copy 幂等修复）: "+err.Error()))
 			} else {
 				for _, h := range hits {
-					fmt.Fprintf(ctx.Out, "绑定迁移：%s\n", ui.Path(rm.PathOf(h)))
+					fmt.Fprintf(ctx.Out, "绑定挂载：%s\n", ui.Path(rm.PathOf(h)))
 				}
 			}
 		}
 	}
-	if n, err := tier.RewriteSourceChains(ctx.WS.Root, srcRel, dstRel); err == nil && n > 0 {
-		fmt.Fprintf(ctx.Out, "出处链改写 %d 处\n", n)
-	}
 	return dstRel, nil
 }
 
+// newShip 船坞命令：copy 装船（sea→ship 复制）、move 入河（ship→river 真实迁移）
 func newShip() Command {
-	return newTierCmd("ship", "船坞：加工中条目查阅/装船/入河", []string{"move"}, func(ctx *Ctx, sub string) (bool, error) {
-		if sub == "move" {
-			return true, runShipMove(ctx)
+	return newTierCmd("ship", "船坞：加工中条目查阅/装船/入河", []string{"copy", "move"}, func(ctx *Ctx, sub string) (bool, error) {
+		switch sub {
+		case "copy":
+			return true, runShipCopy(ctx)
+		case "move":
+			return true, runRiverMove(ctx)
 		}
 		return false, nil
 	})
@@ -201,7 +205,7 @@ func askMountPoint(ctx *Ctx, rm *roadmap.Roadmap) (roadmap.PointRef, bool) {
 	}
 }
 
-// runRiverMove 船坞→河流命令入口：选择器 → 挂载解析 → riverLanding 核心 → 绑定迁移 → 出处链改写。
+// runRiverMove 入河命令入口（/ship move）：选择器 → 挂载解析 → riverLanding 核心 → 绑定迁移 → 出处链改写。
 func runRiverMove(ctx *Ctx) error {
 	it, err := pickTierEntryGrouped(ctx, "ship", strings.Join(ctx.Args[1:], " "), "选择要入河（加工完成）的船坞条目")
 	if err != nil {
@@ -285,7 +289,7 @@ func runSpringAdd(ctx *Ctx, kw string) error {
 	if err := roadmap.Save(ctx.WS.RoadmapFile(), rm); err != nil {
 		return err
 	}
-	fmt.Fprintf(ctx.Out, "已创建并绑定 %s\n", ui.Path(rel))
+	fmt.Fprintf(ctx.Out, "%s %s\n", ui.OK("已创建并绑定"), ui.Path(rel))
 	return editOpen(ctx, filepath.Join(ctx.WS.Root, filepath.FromSlash(rel)))
 }
 
@@ -314,7 +318,7 @@ func runCodeAdd(ctx *Ctx, kw string) error {
 	if err := roadmap.Save(ctx.WS.RoadmapFile(), rm); err != nil {
 		return err
 	}
-	fmt.Fprintf(ctx.Out, "已创建并绑定 %s\n", ui.Path(rel))
+	fmt.Fprintf(ctx.Out, "%s %s\n", ui.OK("已创建并绑定"), ui.Path(rel))
 	return editOpen(ctx, filepath.Join(ctx.WS.Root, filepath.FromSlash(rel)))
 }
 
@@ -328,10 +332,7 @@ func newCode() Command {
 }
 
 func newRiver() Command {
-	return newTierCmd("river", "河流：沉淀查阅/入河/编辑", []string{"move"}, func(ctx *Ctx, sub string) (bool, error) {
-		if sub == "move" {
-			return true, runRiverMove(ctx)
-		}
+	return newTierCmd("river", "河流：沉淀查阅/编辑", nil, func(ctx *Ctx, sub string) (bool, error) {
 		return false, nil
 	})
 }

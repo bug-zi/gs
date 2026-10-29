@@ -56,9 +56,11 @@ func TestCreateCodeEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "package main") || !strings.Contains(s, "func main()") ||
-		!strings.Contains(s, `fmt.Println("slice 底层结构与扩容")`) {
+	if !strings.Contains(s, "package main") || !strings.Contains(s, "func main()") {
 		t.Fatalf("模板内容不符:\n%s", s)
+	}
+	if strings.Contains(s, "fmt.") || strings.Contains(s, "TODO") || strings.Contains(s, "go run") {
+		t.Fatalf("模板不应含占位演示代码:\n%s", s)
 	}
 	// 同名冲突
 	if _, err := CreateCodeEntry(ws, "slice 底层结构与扩容"); err == nil {

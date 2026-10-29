@@ -55,7 +55,7 @@ func viewLog(out io.Writer, ws *workspace.Workspace, t time.Time, create bool) (
 		if err := os.WriteFile(path, nil, 0o644); err != nil {
 			return false, err
 		}
-		fmt.Fprintf(out, "%s（新文件）已创建\n", ui.Path(ws.Rel(path)))
+		fmt.Fprintf(out, "%s%s\n", ui.Path(ws.Rel(path)), ui.OK("（新文件）已创建"))
 		return true, nil
 	}
 	fmt.Fprintf(out, "%s\n%s", ui.Path(ws.Rel(path)), ui.RenderMD(string(data)))

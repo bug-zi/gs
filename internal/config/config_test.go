@@ -75,3 +75,16 @@ func TestLoadMerge(t *testing.T) {
 		t.Fatalf("GS_API_KEY 未生效")
 	}
 }
+
+func TestDefaultExcludeGs(t *testing.T) {
+	cfg, err := Load(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range cfg.Scan.Exclude {
+		if e == ".gs" {
+			return
+		}
+	}
+	t.Fatal("默认 scan.exclude 应含 .gs（回收站不入搜索索引）")
+}

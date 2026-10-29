@@ -54,9 +54,9 @@ func CreateEntryIn(ws *workspace.Workspace, dir, topic, source, body string) (st
 	return ws.Rel(path), nil
 }
 
-// CodeTemplate 知识点演示代码初始模板：可运行、gofmt 合规
-func CodeTemplate(topic, rel string) string {
-	return fmt.Sprintf("// 知识点「%s」演示代码\n// 运行：go run %q\n\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n\t// TODO: 写下与该知识点相关的演示代码\n\tfmt.Println(%q)\n}\n", topic, rel, topic)
+// CodeTemplate 知识点演示代码初始模板：仅可编译骨架，无占位演示代码
+func CodeTemplate(topic string) string {
+	return fmt.Sprintf("// 知识点「%s」演示代码\n\npackage main\n\nfunc main() {}\n", topic)
 }
 
 // CreateCodeEntry 创建知识点演示代码 Study/code/<标题>.go，返回工作区相对路径，原子写
@@ -71,7 +71,7 @@ func CreateCodeEntry(ws *workspace.Workspace, topic string) (string, error) {
 	if err := os.MkdirAll(ws.CodeDir(), 0o755); err != nil {
 		return "", err
 	}
-	if err := workspace.WriteFileAtomic(path, []byte(CodeTemplate(topic, ws.Rel(path)))); err != nil {
+	if err := workspace.WriteFileAtomic(path, []byte(CodeTemplate(topic))); err != nil {
 		return "", err
 	}
 	return ws.Rel(path), nil

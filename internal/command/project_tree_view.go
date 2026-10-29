@@ -7,8 +7,8 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
-	"github.com/bugzi/gs/internal/termkey"
 	"github.com/bugzi/gs/internal/structure"
+	"github.com/bugzi/gs/internal/termkey"
 	"github.com/bugzi/gs/internal/ui"
 	"github.com/bugzi/gs/internal/workspace"
 )
@@ -94,14 +94,21 @@ func treeWindow(n, cur, avail int) (lo, hi int) {
 	return lo, lo + avail
 }
 
-// renderRow 单行渲染：超宽降级为素文本截断；光标行整行反白；普通行介绍/笔记灰色
+// treeMove 光标循环移动：底→下回顶、顶→上到底；空表不动
+func treeMove(cur *int, delta, n int) {
+	if n > 0 {
+		*cur = ((*cur+delta)%n + n) % n
+	}
+}
+
+// renderRow 单行渲染：超宽降级为素文本截断；光标行微底亮字；普通行介绍/笔记灰色
 func renderRow(r treeRow, selected bool, width int) string {
 	plain := r.plain()
 	if runewidth.StringWidth(plain) > width {
 		return runewidth.Truncate(plain, width, "…")
 	}
 	if selected {
-		return "\x1b[7m" + plain + "\x1b[27m"
+		return ui.ANSISelBg + ui.ANSIBright + plain + ui.ANSIReset
 	}
 	line := r.head
 	if r.desc != "" {
@@ -220,9 +227,7 @@ func runTreeBrowser(ctx *Ctx, p workspace.Project, cache *structure.StructureCac
 			if k.Kind == termkey.KindDown {
 				delta = 1
 			}
-			if next := st.cur + delta; next >= 0 && next < len(rows) {
-				st.cur = next
-			}
+			treeMove(&st.cur, delta, len(rows))
 		case termkey.KindTab:
 			if r := rowAt(rows, st.cur); r != nil && r.isDir {
 				st.expanded[r.rel] = !st.expanded[r.rel]
@@ -269,22 +274,24 @@ func runTreeBrowser(ctx *Ctx, p workspace.Project, cache *structure.StructureCac
 				fmt.Fprint(ctx.Out, "\r\x1b[J\r\n")
 				return nil
 			case 'j':
-				if st.cur < len(rows)-1 {
-					st.cur++
-				}
+				treeMove(&st.cur, 1, len(rows))
 			case 'k':
-				if st.cur > 0 {
-					st.cur--
-				}
+				treeMove(&st.cur, -1, len(rows))
 			case 'r':
 				sess.close()
 				fmt.Fprint(ctx.Out, "\r\x1b[J\r\n")
 				if !aiConfigured(ctx) {
 					fmt.Fprintln(ctx.Out, ui.Err("未配置 AI，无法生成介绍"))
-				} else if err := genTreeDescriptions(ctx, p, cache, st.root); err != nil {
-					fmt.Fprintln(ctx.Out, ui.Err("AI 生成介绍失败："+err.Error()))
 				} else {
-					fmt.Fprintln(ctx.Out, ui.Dim("介绍已更新"))
+					cache.ClearSubtree(st.root) // 清当前子树后强制重建（根 = 全项目）
+					failed, err := genTreeDescriptions(ctx, p, cache, st.root)
+					if err != nil {
+						fmt.Fprintln(ctx.Out, ui.Err("AI 生成介绍失败："+err.Error()))
+					} else if len(failed) > 0 {
+						fmt.Fprintln(ctx.Out, ui.Err(fmt.Sprintf("%d 批介绍生成失败，可再按 r 重试", len(failed))))
+					} else {
+						fmt.Fprintln(ctx.Out, ui.Dim("介绍已更新"))
+					}
 				}
 				if !sess.resume() {
 					return printStaticTree(ctx, p, cache)

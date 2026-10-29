@@ -9,10 +9,10 @@ import (
 // Buffer 多行文本缓冲;光标以 (逻辑行下标, 行内 rune 下标) 表示。
 // want 为 ↑↓ 移动时的粘滞视觉列,-1 表示未激活。
 type Buffer struct {
-	lines [][]rune
-	cur   int
-	col   int
-	want  int
+	lines      [][]rune
+	cur, col   int
+	want       int
+	undo, redo []snapshot
 }
 
 func NewBuffer(s string) *Buffer {
@@ -122,6 +122,137 @@ func (b *Buffer) Bottom() {
 	b.col = len(b.lines[b.cur])
 	b.resetWant()
 }
+
+const undoLimit = 100
+
+// snapshot 一次可回退状态:整份行拷贝 + 光标 + 粘滞列
+type snapshot struct {
+	lines    [][]rune
+	cur, col int
+	want     int
+}
+
+func cloneLines(lines [][]rune) [][]rune {
+	out := make([][]rune, len(lines))
+	for i, l := range lines {
+		out[i] = append([]rune{}, l...)
+	}
+	return out
+}
+
+func (b *Buffer) snap() snapshot {
+	return snapshot{lines: cloneLines(b.lines), cur: b.cur, col: b.col, want: b.want}
+}
+
+func (b *Buffer) restore(s snapshot) {
+	b.lines = cloneLines(s.lines)
+	b.cur, b.col, b.want = s.cur, s.col, s.want
+}
+
+// PushUndo 压入当前状态快照;命令层在每个可撤销动作前调用一次,同时清空 redo
+func (b *Buffer) PushUndo() {
+	b.undo = append(b.undo, b.snap())
+	if len(b.undo) > undoLimit {
+		b.undo = b.undo[1:]
+	}
+	b.redo = nil
+}
+
+// Undo 回退一步;空栈返回 false
+func (b *Buffer) Undo() bool {
+	if len(b.undo) == 0 {
+		return false
+	}
+	s := b.undo[len(b.undo)-1]
+	b.undo = b.undo[:len(b.undo)-1]
+	b.redo = append(b.redo, b.snap())
+	b.restore(s)
+	return true
+}
+
+// Redo 重做一步;空栈返回 false
+func (b *Buffer) Redo() bool {
+	if len(b.redo) == 0 {
+		return false
+	}
+	s := b.redo[len(b.redo)-1]
+	b.redo = b.redo[:len(b.redo)-1]
+	b.undo = append(b.undo, b.snap())
+	b.restore(s)
+	return true
+}
+
+// MoveLine 上/下移当前行(或列表项块);到边界不动返回 false
+func (b *Buffer) MoveLine(up bool) bool {
+	out, newCur, ok := moveUpDown(b.lines, b.cur, up)
+	if !ok {
+		return false
+	}
+	b.lines = out
+	b.cur = newCur
+	if b.col > len(b.lines[b.cur]) {
+		b.col = len(b.lines[b.cur])
+	}
+	b.resetWant()
+	return true
+}
+
+// CanMove 当前行(块)能否上/下移(供命令层先判后压撤销栈)
+func (b *Buffer) CanMove(up bool) bool {
+	_, _, ok := moveUpDown(b.lines, b.cur, up)
+	return ok
+}
+
+// listPrefix 列表行前缀宽度(-␣→2、1.␣→3、10.␣→4);非列表行 0
+func listPrefix(s string) int {
+	if m := reBullet.FindStringSubmatch(s); m != nil {
+		return len([]rune(m[1] + m[2] + " "))
+	}
+	if m := reOrdered.FindStringSubmatch(s); m != nil {
+		return len([]rune(m[1] + m[2] + m[3] + " "))
+	}
+	return 0
+}
+
+// Indent 列表行按前缀宽度缩进(嵌套层级符合 CommonMark),非列表行插 2 空格
+func (b *Buffer) Indent() {
+	if w := listPrefix(string(b.lines[b.cur])); w > 0 {
+		pad := make([]rune, w)
+		for i := range pad {
+			pad[i] = ' '
+		}
+		b.lines[b.cur] = append(pad, b.lines[b.cur]...)
+		b.col += w
+		b.resetWant()
+		return
+	}
+	b.Insert(' ', ' ')
+}
+
+// Outdent 反缩进:删行首至多一个前缀宽度(非列表行至多 2)的空格,下限 0
+func (b *Buffer) Outdent() {
+	w := 2
+	if p := listPrefix(string(b.lines[b.cur])); p > 0 {
+		w = p
+	}
+	lr := b.lines[b.cur]
+	n := leadIndent(lr)
+	if n > w {
+		n = w
+	}
+	if n > 0 {
+		b.lines[b.cur] = append([]rune{}, lr[n:]...)
+		if b.col < n {
+			b.col = 0
+		} else {
+			b.col -= n
+		}
+	}
+	b.resetWant()
+}
+
+// CanOutdent 行首有空白可反缩进(供命令层先判后压撤销栈)
+func (b *Buffer) CanOutdent() bool { return leadIndent(b.lines[b.cur]) > 0 }
 
 var (
 	reBullet      = regexp.MustCompile(`^([ \t]*)([-*+])[ \t]+`)

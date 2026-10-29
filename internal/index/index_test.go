@@ -39,3 +39,26 @@ func TestLoadMissing(t *testing.T) {
 		t.Fatal("应为空索引")
 	}
 }
+
+func TestCountAndPrunePaths(t *testing.T) {
+	ix := New()
+	ix.Topics = []Topic{
+		{Name: "a", Files: []FileRef{{Path: "x.md"}, {Path: "y.md"}}},
+		{Name: "b", Files: []FileRef{{Path: "x.md"}}},
+	}
+	if n := ix.CountPaths(map[string]bool{"x.md": true}); n != 2 {
+		t.Fatalf("CountPaths = %d, want 2", n)
+	}
+	if n := ix.PrunePaths(map[string]bool{"x.md": true}); n != 2 {
+		t.Fatalf("PrunePaths = %d, want 2", n)
+	}
+	if len(ix.Topics[0].Files) != 1 || ix.Topics[0].Files[0].Path != "y.md" {
+		t.Fatalf("a 组应只剩 y.md，got %v", ix.Topics[0].Files)
+	}
+	if len(ix.Topics[1].Files) != 0 {
+		t.Fatalf("b 组应清空，got %v", ix.Topics[1].Files)
+	}
+	if n := ix.CountPaths(map[string]bool{"x.md": true}); n != 0 {
+		t.Fatal("清除后 CountPaths 应为 0")
+	}
+}

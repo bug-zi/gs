@@ -19,11 +19,17 @@ const helpText = `gs · Go 学习工作台
   /plan done|doing|todo <关键词>  快捷标记知识点（浏览器内 d/s/t 为主路径）
   /plan add branch|point  建树录入（point 全局唯一，可带分组）
   /plan renumber          按树序全量重排 river 编号（dry-run 预览，确认执行，引用同步改写）
+  /plan del branch|point <关键词>  删除空主干 / 删除知识点（解绑保留文件，river 收容 99-未挂载）
   /sea [关键词]           大海条目查阅；/sea import 整理 inbox，/sea edit 编辑
-  /ship [关键词]          船坞（加工中）查阅；/ship move 装船开始加工（sea→ship，装船即开编辑器）
-  /river [关键词]         河流条目查阅；/river move 宣告加工完成入河（ship→river，领号挂载）
+  /ship [关键词]          船坞（加工中）查阅；/ship copy 装船（sea→ship 复制，装船即开编辑器），/ship move 入河（ship→river 真实迁移，领号挂载）
+  /river [关键词]         河流条目查阅，/river edit 编辑
   /spring [关键词]        泉水查阅；/spring add <知识点> 创建该知识点唯一的总结并绑定
   /code [关键词]          代码查阅；/code add <知识点> 创建该知识点唯一的演示代码并绑定
+  /notes [文本]           便签缓存：/notes <文本> 记一条，/notes 列出
+  /notes edit|del         编辑便签文件 / 选择删除
+  /notes move [关键词]    便签原文追加到 river/spring 条目并移出缓存
+  /notes tidy             AI 整批归位到现有 river/spring（整批预览，一次确认）
+  /sea|/ship|/river|/spring|/code del  删除条目（预览影响，确认后移入回收站，可手动找回）
   /search <关键词>        全局搜索 md 与 go 源码（支持空格分隔多词 AND）
   /project [名称]        查看项目聚合信息（介绍/学习日志/走读/设计/代码概况）
   /project edit <名称>   编辑项目文档
@@ -63,5 +69,5 @@ func newExit() Command {
 
 // Build 全部 M1 命令；后续任务把新命令 append 进来
 func Build() []Command {
-	return []Command{newLogs(), newSea(), newShip(), newRiver(), newSpring(), newCode(), newPlan(), newSearch(), newShow(), newProject(), newReview(), newAI(), newHelp(), newExit()}
+	return []Command{newLogs(), newSea(), newShip(), newRiver(), newSpring(), newCode(), newNotes(), newPlan(), newSearch(), newShow(), newProject(), newReview(), newAI(), newHelp(), newExit()}
 }

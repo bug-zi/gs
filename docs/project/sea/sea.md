@@ -2,7 +2,7 @@
 
 sea（大海）模块文档目录：三层学习框架第一层「外部知识」的需求正本与 spec/plan 归属。
 
-**使用方式**：涉及 `/sea` 命令、`Study/sea/` 目录体系（ai / interview / 未分类 / 各主题子目录）、工作区根 `seaport/` 自动导入、外部知识录入与导入整理的功能，其 design.md / spec / plan 放本目录；落地或废弃的 spec/plan 移入本目录 `archive/`。
+**使用方式**：涉及 `/sea` 命令、`Study/sea/` 目录体系（ai / interview / 未分类 / 各主题子目录）、工作区根 `seaport/` 自动导入、外部知识录入与导入整理、`/ship copy` 装船（sea→ship 复制开始加工，sea 原件永久保留）的功能，其 design.md / spec / plan 放本目录；落地或废弃的 spec/plan 移入本目录 `archive/`。
 
 **本目录内容**：
 

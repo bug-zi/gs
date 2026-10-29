@@ -59,3 +59,41 @@ func TestStructureCacheLoadMissingAndBroken(t *testing.T) {
 		t.Fatal("损坏缓存应报错")
 	}
 }
+
+func TestStructureCacheMissing(t *testing.T) {
+	c := &StructureCache{}
+	c.Merge([]Node{{Path: "main.go", Desc: "入口"}})
+	targets := []Entry{
+		{Name: "main.go", Rel: "main.go"},
+		{Name: "web", Rel: "web", IsDir: true},
+		{Name: "a.go", Rel: "web/a.go"},
+	}
+	missing := c.Missing(targets)
+	if len(missing) != 2 || missing[0].Rel != "web" || missing[1].Rel != "web/a.go" {
+		t.Fatalf("应只含缓存缺失节点且保持顺序: %+v", missing)
+	}
+}
+
+func TestStructureCacheClearSubtree(t *testing.T) {
+	c := &StructureCache{}
+	c.Merge([]Node{
+		{Path: "internal", Desc: "a"},
+		{Path: "internal/command", Desc: "b"},
+		{Path: "internal/command/x.go", Desc: "c"},
+		{Path: "internalx.go", Desc: "d"},
+		{Path: "web", Desc: "e"},
+	})
+	c.ClearSubtree("internal")
+	for _, p := range []string{"internal", "internal/command", "internal/command/x.go"} {
+		if c.Find(p) != "" {
+			t.Fatalf("%s 应被清除", p)
+		}
+	}
+	if c.Find("internalx.go") != "d" || c.Find("web") != "e" {
+		t.Fatalf("子树外节点不应受影响: %+v", c.Nodes)
+	}
+	c.ClearSubtree("")
+	if len(c.Nodes) != 0 {
+		t.Fatalf("空前缀应清空全部: %+v", c.Nodes)
+	}
+}

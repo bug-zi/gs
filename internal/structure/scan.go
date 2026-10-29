@@ -2,6 +2,7 @@
 package structure
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -62,5 +63,46 @@ func Scan(dir, prefix string, exclude []string) []Entry {
 		}
 		return out[i].Name < out[j].Name
 	})
+	return out
+}
+
+// CollectTargets 递归收集应生成介绍的节点：全部目录（不含根）+ 全部 .go 文件。
+// 跳过隐藏目录与 exclude 段名，与树扫描规则一致；按 Rel 排序返回稳定列表。
+func CollectTargets(projectPath string, exclude []string) []Entry {
+	ex := map[string]bool{}
+	for _, e := range exclude {
+		ex[e] = true
+	}
+	var out []Entry
+	filepath.WalkDir(projectPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if p == projectPath {
+				return nil // 根目录本身不是树节点
+			}
+			if strings.HasPrefix(name, ".") || ex[name] {
+				return filepath.SkipDir
+			}
+			rel, err := filepath.Rel(projectPath, p)
+			if err != nil {
+				return nil
+			}
+			out = append(out, Entry{Name: name, Rel: filepath.ToSlash(rel), IsDir: true})
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(name), ".go") {
+			return nil
+		}
+		rel, err := filepath.Rel(projectPath, p)
+		if err != nil {
+			return nil
+		}
+		out = append(out, Entry{Name: name, Rel: filepath.ToSlash(rel), IsDir: false})
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
 	return out
 }

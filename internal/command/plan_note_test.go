@@ -47,7 +47,8 @@ func writeNote(t *testing.T, root, rel, body string) {
 	}
 }
 
-// 全局原则：≤20 行的文件在 CLI 查阅/操作，>20 行转交外部编辑器（TRAE）查阅+编辑
+// 全局原则：文档文件（.md 等）≤20 行在 CLI 查阅/操作、>20 行转交外部编辑器；
+// 非文档文件（.go/.toml 等）一律直开外部编辑器（TRAE），不进 CLI 查阅/逾行菜单
 func TestOpenPlanNote逾行文件转交外部编辑器(t *testing.T) {
 	fakeEditor(t)
 	muteStdin(t)
@@ -91,7 +92,7 @@ func TestOpenPlanNote短文件CLI查阅(t *testing.T) {
 	}
 }
 
-func TestOpenPlanNoteGo文件CLI查阅(t *testing.T) {
+func TestOpenPlanNoteGo文件直开外部编辑器(t *testing.T) {
 	fakeEditor(t)
 	muteStdin(t)
 	root := t.TempDir()
@@ -103,10 +104,10 @@ func TestOpenPlanNoteGo文件CLI查阅(t *testing.T) {
 		t.Fatalf("openPlanNote: %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "package") {
-		t.Errorf(".go 文件内容应被高亮渲染，实际输出：\n%s", got)
+	if !strings.Contains(got, "正在打开") {
+		t.Errorf(".go 文件应直开外部编辑器（TRAE），实际输出：\n%s", got)
 	}
-	if strings.Contains(got, "长文件") {
-		t.Errorf("短 .go 文件不应转交外部编辑器，实际输出：\n%s", got)
+	if strings.Contains(got, "[e]编辑") || strings.Contains(got, "长文件") {
+		t.Errorf(".go 文件不应进 CLI 查阅/逾行菜单，实际输出：\n%s", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/bugzi/gs/internal/planview"
 	"github.com/bugzi/gs/internal/roadmap"
+	"github.com/bugzi/gs/internal/tier"
 	"github.com/bugzi/gs/internal/ui"
 	"github.com/bugzi/gs/internal/workspace"
 )
@@ -120,7 +121,7 @@ func renderPlan(out *strings.Builder, st State) {
 func timeNowCST() time.Time { return time.Now().In(workspace.CST) }
 
 // planSubCmds plan 子命令；其余首参视为主干过滤关键词
-var planSubCmds = []string{"status", "next", "edit", "done", "doing", "todo", "add"}
+var planSubCmds = []string{"status", "next", "edit", "done", "doing", "todo", "add", "del"}
 
 func newPlan() Command {
 	return Command{
@@ -139,9 +140,11 @@ func newPlan() Command {
 				case "done", "doing", "todo":
 					return runPlanSetStatus(ctx, ctx.Args[0], strings.Join(ctx.Args[1:], " "))
 				case "renumber":
-				return runPlanRenumber(ctx)
-			case "add":
+					return runPlanRenumber(ctx)
+				case "add":
 					return runPlanAdd(ctx, ctx.Args[1:])
+				case "del":
+					return runPlanDel(ctx, ctx.Args[1:])
 				}
 			}
 			return runPlanBrowser(ctx, strings.Join(ctx.Args, " "))
@@ -189,7 +192,7 @@ func runPlanNext(ctx *Ctx, next string) error {
 	if err := workspace.WriteFileAtomic(ctx.WS.StateFile(), []byte(updated)); err != nil {
 		return err
 	}
-	fmt.Fprintf(ctx.Out, "已更新 %s\n", ui.Path("Study/plan/学习状态.md"))
+	fmt.Fprintf(ctx.Out, "%s %s\n", ui.OK("已更新"), ui.Path("Study/plan/学习状态.md"))
 	return nil
 }
 
@@ -254,6 +257,45 @@ func runPlanBrowser(ctx *Ctx, kw string) error {
 			_ = openPlanNote(ctx, rel)
 		},
 		Save: func(rm *roadmap.Roadmap) error { return roadmap.Save(path, rm) },
+		SelectPoint: func(prompt string) (roadmap.PointRef, bool) {
+			return selectPointFlow(ctx, rm, prompt)
+		},
+		Input: func(prompt string) (string, bool) {
+			// 空串透传：换分组「留空清除」依赖空串；改名空标题由 RenamePoint 校验兜底
+			s, err := inputLine(ctx, prompt)
+			return s, err == nil
+		},
+		Confirm: func(summary string) bool {
+			ok, err := confirm(ctx, summary)
+			return err == nil && ok
+		},
+		SelectOne: func(prompt string, opts []string) (int, bool) {
+			return selectOneFlow(ctx, prompt, opts)
+		},
+		Unbound: func(t planview.Tier) []string { return scanUnbound(ctx.WS.Root, rm, t) },
+		RenameFile: func(oldRel, newRel string) error {
+			return os.Rename(
+				filepath.Join(ctx.WS.Root, filepath.FromSlash(oldRel)),
+				filepath.Join(ctx.WS.Root, filepath.FromSlash(newRel)))
+		},
+		ApplyMoves: func(moves []roadmap.FileMove) error {
+			_, err := applyFileMoves(ctx, moves)
+			return err
+		},
+		TrashRel: func(rel string) error {
+			_, err := tier.MoveToTrash(ctx.WS.Root, rel, timeNowCST())
+			return err
+		},
+		CopyFileRel: func(srcRel, dstRel string) error {
+			return tier.CopyFile(ctx.WS.Root, srcRel, dstRel)
+		},
+		MoveFileRel: func(srcRel, dstRel string) error {
+			return tier.MoveFile(ctx.WS.Root, srcRel, dstRel)
+		},
+		RewriteChainsRel: func(srcRel, dstRel string) error {
+			_, err := tier.RewriteSourceChains(ctx.WS.Root, srcRel, dstRel)
+			return err
+		},
 	})
 	if errors.Is(err, planview.ErrNonInteractive) {
 		var st *State
@@ -453,7 +495,7 @@ func runPlanSetStatus(ctx *Ctx, status, kw string) error {
 		return err
 	}
 	done, total := rm.DonePoints(), rm.TotalPoints()
-	fmt.Fprintf(ctx.Out, "已标记 [%s] %s（进度 %d/%d）\n", status, rm.PointAt(ref).Title, done, total)
+	fmt.Fprintf(ctx.Out, "%s [%s] %s（进度 %d/%d）\n", ui.OK("已标记"), status, rm.PointAt(ref).Title, done, total)
 	return nil
 }
 

@@ -83,16 +83,26 @@ const (
 	pagerFull                   // 整篇直出不分页（logs 显示策略：不论行数完整呈现）
 )
 
-// runViewPager 查阅态循环：逾行（>20 行）文件先询问打开方式（gs 全屏查阅/编辑 或 外部编辑器），
+// runViewPager 查阅态循环：非文档文件直开外部编辑器（默认解析链命中 TRAE）；
+// 文档逾行（>20 行）先询问打开方式（gs 全屏查阅/编辑 或 外部编辑器），
 // 短文件维持分页渲染 → [e]编辑 [r]刷新 [q]退出。
 // 渲染内容就是 editPath 文件本身时的标准入口；不转交且整篇直出的显示策略场景（logs）直接调 pagerLoop(pagerFull)。
 func runViewPager(ctx *Ctx, render func() string, editPath func() (string, bool)) error {
 	if path, ok := editPath(); ok {
+		if !edit.IsDocFile(path) { // 非文档文件不进查阅/逾行菜单，直开外部
+			return openExternalBlocked(ctx, path)
+		}
 		if data, err := os.ReadFile(path); err == nil && !edit.ShouldCliEdit(data) {
 			return runLargeFile(ctx, path)
 		}
 	}
 	return pagerLoop(ctx, render, editPath, pagerPaged)
+}
+
+// openExternalBlocked 非文档文件直开外部编辑器：打印提示并阻塞至编辑器关闭
+func openExternalBlocked(ctx *Ctx, path string) error {
+	fmt.Fprintf(ctx.Out, "正在打开 %s ...（编辑器关闭后回到 gs）\n", ui.Path(path))
+	return edit.OpenExternal(path, ctx.Cfg)
 }
 
 // pagerShouldPage 本次渲染是否分页：logs 整篇直出；短文件（≤20 行，与外部编辑器
@@ -110,10 +120,33 @@ func pagerShouldPage(mode pagerMode, editPath func() (string, bool)) bool {
 	return true
 }
 
-// pagerLoop 查阅态按键循环主体：渲染 → 提示 → e/r/q 分发；mode 决定内容打印策略
+// runViewPagerDel 条目查阅入口：非文档直开外部；长短分流同 runViewPager，两路都带 [x] 删除钩子
+func runViewPagerDel(ctx *Ctx, render func() string, editPath func() (string, bool), onDelete func() bool) error {
+	if path, ok := editPath(); ok {
+		if !edit.IsDocFile(path) {
+			return openExternalBlocked(ctx, path)
+		}
+		if data, err := os.ReadFile(path); err == nil && !edit.ShouldCliEdit(data) {
+			return runLargeFileEx(ctx, path, onDelete)
+		}
+	}
+	return pagerLoopEx(ctx, render, editPath, pagerPaged, onDelete)
+}
+
+// pagerLoop 委托无删除钩子的查阅循环
 func pagerLoop(ctx *Ctx, render func() string, editPath func() (string, bool), mode pagerMode) error {
+	return pagerLoopEx(ctx, render, editPath, mode, nil)
+}
+
+// pagerLoopEx 带 [x] 删除钩子的查阅循环；onDelete 在退出 raw 后调用（内含预览确认），
+// 返回 true = 条目已删除，结束查阅。nil = 无删除键，提示行不显示 [x]。
+func pagerLoopEx(ctx *Ctx, render func() string, editPath func() (string, bool), mode pagerMode, onDelete func() bool) error {
 	src, sess := newPagerKeySource()
 	defer sess.close()
+	hint := ui.Dim("[e]编辑 [r]刷新 [q/Esc]退出 > ")
+	if onDelete != nil {
+		hint = ui.Dim("[e]编辑 [x]删除 [r]刷新 [q/Esc]退出 > ")
+	}
 	for {
 		body := render()
 		fmt.Fprint(ctx.Out, "\n")
@@ -122,7 +155,7 @@ func pagerLoop(ctx *Ctx, render func() string, editPath func() (string, bool), m
 		} else {
 			fmt.Fprintf(ctx.Out, "%s\n", body)
 		}
-		fmt.Fprint(ctx.Out, ui.Dim("[e]编辑 [r]刷新 [q/Esc]退出 > "))
+		fmt.Fprint(ctx.Out, hint)
 		line, ok := src.next()
 		if !ok {
 			return nil // Ctrl-D / 读取失败结束查看
@@ -132,6 +165,20 @@ func pagerLoop(ctx *Ctx, render func() string, editPath func() (string, bool), m
 			return nil
 		case "r":
 			continue
+		case "x":
+			if onDelete == nil {
+				continue
+			}
+			if src.sess != nil {
+				sess.close() // 确认交互需要普通终端，先退出 raw
+			}
+			del := onDelete()
+			if src.sess != nil && !sess.resume() {
+				return nil
+			}
+			if del {
+				return nil
+			}
 		case "e":
 			path, ok := editPath()
 			if !ok {

@@ -149,3 +149,13 @@ func HighlightWords(line string, words []string) string {
 func Path(s string) string { return pathStyle.Render(s) }
 func Dim(s string) string  { return dimStyle.Render(s) }
 func Err(s string) string  { return errStyle.Render(s) }
+
+var (
+	goldStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true) // 品牌金粗
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))            // 赭：信息标签
+	okStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("144"))            // 沙：成功语义
+)
+
+func Gold(s string) string  { return goldStyle.Render(s) }
+func Label(s string) string { return labelStyle.Render(s) }
+func OK(s string) string    { return okStyle.Render(s) }

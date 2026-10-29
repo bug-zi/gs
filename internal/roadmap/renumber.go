@@ -3,6 +3,7 @@ package roadmap
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -133,4 +134,46 @@ func BuildRenumberPlan(rm *Roadmap, existing []string) *RenumberPlan {
 		plan.Orphans = append(plan.Orphans, FileMove{rel, to})
 	}
 	return plan
+}
+
+// BuildUnmountMoves 把 rels 收容到 99-未挂载（保留原名；与收容区现有文件撞名时基名后插 .k 顺延）。
+// existingUnmounted 为收容区现有文件名清单，纯函数不触碰文件系统。
+func BuildUnmountMoves(rels []string, existingUnmounted []string) []FileMove {
+	used := map[string]bool{}
+	for _, e := range existingUnmounted {
+		used[e] = true
+	}
+	moves := make([]FileMove, 0, len(rels))
+	for _, rel := range rels {
+		base := filepath.Base(rel)
+		if used[base] {
+			ext := filepath.Ext(base)
+			stem := strings.TrimSuffix(base, ext)
+			for k := 1; ; k++ {
+				cand := fmt.Sprintf("%s.%d%s", stem, k, ext)
+				if !used[cand] {
+					base = cand
+					break
+				}
+			}
+		}
+		used[base] = true
+		moves = append(moves, FileMove{rel, RiverDirRel + "/" + UnmountedDirName + "/" + base})
+	}
+	return moves
+}
+
+// ListUnmounted 列出收容区现有文件名（目录缺失视为空；子目录不计入）
+func ListUnmounted(root string) []string {
+	entries, err := os.ReadDir(filepath.Join(root, RiverDirRel, UnmountedDirName))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }

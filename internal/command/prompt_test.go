@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/bugzi/gs/internal/ui"
 )
 
 func TestSelectStateMove(t *testing.T) {
@@ -43,17 +45,18 @@ func TestDrawSelectFrame(t *testing.T) {
 			t.Fatalf("菜单帧缺 %q:\n%s", want, out)
 		}
 	}
-	// 光标行反白 + ❯，且只标在首项
-	if !strings.Contains(buf.String(), "\x1b[7m❯ 用 trae 打开") {
-		t.Fatalf("选中项应反白带 ❯: %q", buf.String())
+	// 光标行金箭头 + 微底亮字，且只标在首项
+	selRow := ui.ANSIGold + "❯" + ui.ANSIReset + " " + ui.ANSISelBg + ui.ANSIBright + "用 trae 打开"
+	if !strings.Contains(buf.String(), selRow) {
+		t.Fatalf("选中项应金箭头微底: %q", buf.String())
 	}
-	if strings.Count(buf.String(), "\x1b[7m") != 1 {
-		t.Fatalf("应只有一行反白: %q", buf.String())
+	if strings.Count(buf.String(), ui.ANSISelBg) != 1 {
+		t.Fatalf("应只有一行选中底: %q", buf.String())
 	}
 	// 移动光标后 ❯ 跟随
 	buf.Reset()
 	drawSelectFrame(&buf, "t", opts, &selectState{sel: 2})
-	if !strings.Contains(buf.String(), "\x1b[7m❯ 返回") {
+	if !strings.Contains(buf.String(), ui.ANSISelBg+ui.ANSIBright+"返回") {
 		t.Fatalf("光标应跟随到末项: %q", buf.String())
 	}
 }
@@ -95,7 +98,54 @@ func TestDrawSelectFrameCursorFollow(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	drawSelectFrame(&buf, "t", opts, &selectState{sel: 1})
-	if !strings.Contains(buf.String(), "\x1b[7m❯ 返回") {
+	if !strings.Contains(buf.String(), ui.ANSISelBg+ui.ANSIBright+"返回") {
 		t.Fatalf("光标应跟随到末项: %q", buf.String())
+	}
+}
+
+func TestDrawSelectFrameDim(t *testing.T) {
+	opts := []menuOption{
+		{Label: "已装船条目", Value: "a", Dim: true},
+		{Label: "新材料", Value: "b"},
+	}
+	var buf bytes.Buffer
+	drawSelectFrame(&buf, "选择条目", opts, &selectState{sel: 1})
+	s := buf.String()
+	if !strings.Contains(s, ui.Dim("已装船条目")) {
+		t.Fatalf("Dim 项应与提示行同款阴影色: %q", s)
+	}
+	if !strings.Contains(s, ui.ANSISelBg+ui.ANSIBright+"新材料") {
+		t.Fatalf("光标行应保持反白高亮不受 Dim 影响: %q", s)
+	}
+}
+
+// TestDrawSelectFrameDimSelected 已装船条目被选中：微底提示位置但保持灰字，不亮白
+func TestDrawSelectFrameDimSelected(t *testing.T) {
+	opts := []menuOption{{Label: "已装船条目", Value: "a", Dim: true}}
+	var buf bytes.Buffer
+	drawSelectFrame(&buf, "t", opts, &selectState{sel: 0})
+	s := buf.String()
+	if strings.Contains(s, ui.ANSIBright) {
+		t.Fatalf("已装船条目选中不应亮白高亮: %q", s)
+	}
+	if !strings.Contains(s, ui.ANSISelBg) || !strings.Contains(s, ui.ANSIFaint) {
+		t.Fatalf("选中应微底且保持灰字: %q", s)
+	}
+}
+
+func TestPlainOptionsTextDim(t *testing.T) {
+	opts := []menuOption{
+		{Label: "已装船", Value: "a", Dim: true},
+		{Label: "新材料", Value: "b"},
+	}
+	s := plainOptionsText("选择条目", opts)
+	if !strings.Contains(s, ui.Dim("已装船")) {
+		t.Fatalf("降级列表 Dim 项应与提示行同款阴影色: %q", s)
+	}
+	if !strings.Contains(s, "2. 新材料") {
+		t.Fatalf("编号列表应完整: %q", s)
+	}
+	if !strings.HasSuffix(s, "输入编号选择（空/0 取消）> ") {
+		t.Fatalf("应保留输入提示: %q", s)
 	}
 }

@@ -24,6 +24,24 @@ func TestMoveTierBindingSeaToShip(t *testing.T) {
 	}
 }
 
+func TestCopyTierBindingKeepsSea(t *testing.T) {
+	rm := shipFixture()
+	hits := rm.CopyTierBinding("Study/sea/a.md", "Study/ship/a.md", SeaList, ShipList)
+	if len(hits) != 1 || hits[0] != (PointRef{0, 0}) {
+		t.Fatalf("hits = %v, want [{0 0}]", hits)
+	}
+	p := rm.PointAt(PointRef{0, 0})
+	if len(p.Sea) != 2 || p.Sea[0] != "Study/sea/a.md" || p.Sea[1] != "Study/sea/b.md" {
+		t.Fatalf("Sea 绑定应原样保留，Sea = %v", p.Sea)
+	}
+	if len(p.Ship) != 1 || p.Ship[0] != "Study/ship/a.md" {
+		t.Fatalf("Ship = %v, want [Study/ship/a.md]", p.Ship)
+	}
+	if hits := rm.CopyTierBinding("Study/sea/none.md", "Study/ship/x.md", SeaList, ShipList); len(hits) != 0 {
+		t.Fatalf("未命中应返回空，hits = %v", hits)
+	}
+}
+
 func TestMoveTierBindingSameListRename(t *testing.T) {
 	rm := shipFixture()
 	rm.PointAt(PointRef{0, 0}).River = []string{"Study/river/old.md"}

@@ -81,7 +81,7 @@ func renderTierStats(st TierStats) string {
 		}
 	}
 	if st.ShipTotal > 0 {
-		b.WriteString("\n加工中（待入河，/river move 宣告完成）：\n")
+		b.WriteString("\n加工中（待入河，/ship move 宣告完成）：\n")
 		for _, f := range st.ShipFiles {
 			fmt.Fprintf(&b, "- %s\n", f)
 		}

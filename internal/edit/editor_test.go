@@ -108,3 +108,44 @@ func TestWaitArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestIsDocFile(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"a.md", true},
+		{"a.markdown", true},
+		{"a.txt", true},
+		{"a.doc", true},
+		{"a.docx", true},
+		{"a.pdf", true},
+		{"dir/a.MD", true},  // 大写扩展名也算文档
+		{"a.go", false},
+		{"a.toml", false},
+		{"a.json", false},
+		{"a.js", false},
+		{"Makefile", false}, // 无扩展名视为非文档
+	}
+	for _, c := range cases {
+		if got := IsDocFile(c.path); got != c.want {
+			t.Errorf("%s: IsDocFile = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+// TestOpenNonDocGoesExternal 非文档短文件不得进内嵌编辑：
+// 配置指向不存在的编辑器时，走外部链路会在 LookPath 处确定性报「编辑器不可用」
+func TestOpenNonDocGoesExternal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{}
+	cfg.UI.Editor = "gs-no-such-editor-xyz"
+	err := Open(path, cfg)
+	if err == nil || !strings.Contains(err.Error(), "编辑器不可用") {
+		t.Fatalf("非文档应直走外部链路报「编辑器不可用」，got %v", err)
+	}
+}

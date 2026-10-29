@@ -14,6 +14,18 @@ import (
 // fallbackEditors 无显式配置时的兜底顺序：TRAE 优先（开发者主力），code/notepad 兜底
 var fallbackEditors = []string{"trae", "code", "notepad"}
 
+// docExts 文档类扩展名（小写比较）：维持 gs 现有查阅/编辑流程；
+// 其余文件（代码/配置等）一律外部编辑器直开（默认解析链命中 TRAE）
+var docExts = map[string]bool{
+	".md": true, ".markdown": true, ".txt": true,
+	".doc": true, ".docx": true, ".pdf": true,
+}
+
+// IsDocFile 判断 path 是否文档类文件；无扩展名视为非文档
+func IsDocFile(path string) bool {
+	return docExts[strings.ToLower(filepath.Ext(path))]
+}
+
 // Resolve 编辑器解析顺序：config UI.Editor > $EDITOR > $VISUAL > trae > code > notepad。
 // 都找不到时返回空串。
 func Resolve(cfg *config.Config) string {
@@ -33,9 +45,13 @@ func Resolve(cfg *config.Config) string {
 	return ""
 }
 
-// Open 编辑入口统一分流：≤ maxCliLines 行走 CLI 全屏编辑，否则外部编辑器。
+// Open 编辑入口统一分流：非文档文件一律外部编辑器直开；
+// 文档文件 ≤ maxCliLines 行走 CLI 全屏编辑，否则外部编辑器。
 // tea 启动失败自动降级外部。
 func Open(path string, cfg *config.Config) error {
+	if !IsDocFile(path) { // 非文档文件（代码/配置等）不进内嵌，直开外部
+		return openExternal(path, cfg)
+	}
 	if data, err := os.ReadFile(path); err == nil && ShouldCliEdit(data) {
 		if err := EditInline(path, data); err == nil {
 			return nil

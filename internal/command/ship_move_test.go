@@ -43,22 +43,25 @@ func TestMoveToShip(t *testing.T) {
 		t.Fatalf("dst = %s", dst)
 	}
 	if _, err := os.Stat(filepath.Join(ws.Root, "Study", "ship", "a.md")); err != nil {
-		t.Fatalf("ship 文件缺失: %v", err)
+		t.Fatalf("ship 副本缺失: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, "Study", "sea", "g", "a.md")); !os.IsNotExist(err) {
-		t.Fatal("sea 原文件应已不在")
+	if _, err := os.Stat(filepath.Join(ws.Root, "Study", "sea", "g", "a.md")); err != nil {
+		t.Fatalf("sea 原件应保留: %v", err)
 	}
 	rm, err := roadmap.Load(ws.RoadmapFile())
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := rm.Branches[0].Points[0]
+	if len(p.Sea) != 1 || p.Sea[0] != "Study/sea/g/a.md" {
+		t.Fatalf("Sea 绑定应原样保留: %v", p.Sea)
+	}
 	if len(p.Ship) != 1 || p.Ship[0] != "Study/ship/a.md" {
-		t.Fatalf("Ship 绑定未迁移: %v", p.Ship)
+		t.Fatalf("Ship 绑定未挂载: %v", p.Ship)
 	}
 	data, _ := os.ReadFile(filepath.Join(ws.Root, "Study", "river", "r.md"))
-	if !strings.Contains(string(data), "> 出处：Study/ship/a.md") {
-		t.Fatalf("出处链未改写：\n%s", data)
+	if !strings.Contains(string(data), "> 出处：Study/sea/g/a.md") {
+		t.Fatalf("装船不改写出处链，应仍指向 sea 原件：\n%s", data)
 	}
 }
 

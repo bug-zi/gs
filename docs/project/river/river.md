@@ -2,7 +2,7 @@
 
 river（河流）模块文档目录：三层学习框架第二层「摘录沉淀」的需求正本与 spec/plan 归属。
 
-**使用方式**：涉及 `/river` 命令、`Study/river/` 目录、sea→river 摘录流动与知识点挂载的功能，其 design.md / spec / plan 放本目录；落地或废弃的 spec/plan 移入本目录 `archive/`。
+**使用方式**：涉及 `/river` 命令、`Study/river/` 目录（两位主干文件夹 + `<点两位>-<标题>` 树序编号，`99-未挂载/` 收容区）、sea→ship→river 加工入河流转与知识点挂载、`/plan renumber` 树序重排的功能，其 design.md / spec / plan 放本目录；落地或废弃的 spec/plan 移入本目录 `archive/`。
 
 **本目录内容**：
 

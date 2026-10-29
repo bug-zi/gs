@@ -3,6 +3,7 @@ package repl
 import (
 	"strings"
 
+	"github.com/bugzi/gs/internal/ui"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -41,7 +42,28 @@ func buildInputLineFit(prompt string, st LineState, ghost string, avail int) (st
 			}
 		}
 	}
-	return b.String(), runewidth.StringWidth(prompt) + runewidth.StringWidth(before)
+	return b.String(), plainWidth(prompt) + runewidth.StringWidth(before)
+}
+
+// plainWidth 剥离 ANSI CSI 转义序列后的显示宽度（带色提示符计宽用）
+func plainWidth(s string) int {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !((s[j] >= 'a' && s[j] <= 'z') || (s[j] >= 'A' && s[j] <= 'Z')) {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return runewidth.StringWidth(b.String())
 }
 
 // inputWindow 在 avail 列内选取包含光标的可见窗口 [lo,hi)，startCol 为窗口
@@ -95,17 +117,17 @@ func truncateByWidth(s string, max int) string {
 	return b.String()
 }
 
-// buildPanelLines 候选面板行：提示在最上，高亮项带 ❯
+// buildPanelLines 候选面板行：提示斜体暗灰在最上，选中项金箭头+微底亮字，未选中中灰
 func buildPanelLines(cands []string, hint string, sel int) []string {
 	var lines []string
 	if hint != "" {
-		lines = append(lines, "\x1b[2m"+hint+"\x1b[0m")
+		lines = append(lines, ui.ANSIIdle+ui.ANSIItalic+hint+ui.ANSIReset)
 	}
 	for i, c := range cands {
 		if i == sel {
-			lines = append(lines, "\x1b[7m❯ "+c+"\x1b[27m")
+			lines = append(lines, ui.ANSIGold+"❯"+ui.ANSIReset+" "+ui.ANSISelBg+ui.ANSIBright+c+ui.ANSIReset)
 		} else {
-			lines = append(lines, "  \x1b[2m"+c+"\x1b[0m")
+			lines = append(lines, "  "+ui.ANSIMid+c+ui.ANSIReset)
 		}
 	}
 	return lines

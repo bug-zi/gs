@@ -16,7 +16,7 @@ func TestRenderStatic(t *testing.T) {
 		"语言基础 ·", // dot 引导线
 		"1/3",
 		"语法核心", // 分组小标题
-		"├─ [x] slice 底层结构与扩容 *", // done 符号 + 高频星标
+		"├─ [x] slice 底层结构与扩容", // done 符号
 		"└─ [ ] iface/eface 底层",
 		"└─ [ ] atomic",
 	} {

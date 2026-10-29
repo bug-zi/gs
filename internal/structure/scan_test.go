@@ -3,6 +3,7 @@ package structure
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -73,5 +74,24 @@ func TestScanSubdirRel(t *testing.T) {
 func TestScanMissingDir(t *testing.T) {
 	if entries := Scan(filepath.Join(t.TempDir(), "nope"), "", nil); entries != nil {
 		t.Fatalf("不存在的目录应返回 nil: %v", entries)
+	}
+}
+
+func TestCollectTargets(t *testing.T) {
+	root := treeFixture(t)
+	targets := CollectTargets(root, []string{"node_modules"})
+	var rels []string
+	for _, e := range targets {
+		rels = append(rels, e.Rel)
+	}
+	want := []string{"internal", "internal/config", "internal/config/config.go", "main.go", "web"}
+	if !reflect.DeepEqual(rels, want) {
+		t.Fatalf("目标集合不符:\n got %v\nwant %v", rels, want)
+	}
+	for _, e := range targets {
+		isDir := e.Name == "internal" || e.Name == "config" || e.Name == "web"
+		if e.IsDir != isDir {
+			t.Fatalf("目录标记不符: %+v", e)
+		}
 	}
 }

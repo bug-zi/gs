@@ -52,12 +52,16 @@ func loadLines(path string) []string {
 
 // drawViewerFrame 重绘查阅帧：状态行 + 视口内容 + 键位提示；提示行不带尾换行，
 // 写完 \x1b[A 归位帧首供下次整体覆盖，整帧恰好占满屏不触发终端滚动
-func drawViewerFrame(out io.Writer, path string, lines []string, off, h int) {
+func drawViewerFrame(out io.Writer, path string, lines []string, off, h int, withDel bool) {
 	end := min(off+h, len(lines))
 	view := lines[off:end]
 	pos := fmt.Sprintf("%d-%d/%d 行", off+1, end, len(lines))
 	if len(lines) == 0 {
 		pos = "空文档"
+	}
+	hint := "[↑↓/jk]行 [PgUp/PgDn/空格]页 [g/G]首尾 [e]gs编辑 [o]TRAE [r]刷新 [q/Esc]退出"
+	if withDel {
+		hint = "[↑↓/jk]行 [PgUp/PgDn/空格]页 [g/G]首尾 [e]gs编辑 [o]TRAE [x]删除 [r]刷新 [q/Esc]退出"
 	}
 	var b strings.Builder
 	b.WriteString("\r\x1b[J")
@@ -65,13 +69,15 @@ func drawViewerFrame(out io.Writer, path string, lines []string, off, h int) {
 	for _, ln := range view {
 		b.WriteString(ln + "\r\n")
 	}
-	b.WriteString(ui.Dim("[↑↓/jk]行 [PgUp/PgDn/空格]页 [g/G]首尾 [e]gs编辑 [o]TRAE [r]刷新 [q/Esc]退出"))
+	b.WriteString(ui.Dim(hint))
 	fmt.Fprintf(out, "%s\x1b[%dA\r", b.String(), len(view)+1)
 }
 
-// runMDViewer 逾行文件全屏查阅器：渲染态滚动浏览，e 进 gs 内编辑、o 交外部编辑器，
-// 两者返回后重读重渲染；q/Esc/Ctrl-C/D 退出回 gs>
-func runMDViewer(ctx *Ctx, path string) error {
+func runMDViewer(ctx *Ctx, path string) error { return runMDViewerEx(ctx, path, nil) }
+
+// runMDViewerEx 全屏查阅带可选 [x] 删除；onDelete 在退出 raw 后调用（内含预览确认），
+// 返回 true = 已删除，退出查阅
+func runMDViewerEx(ctx *Ctx, path string, onDelete func() bool) error {
 	sess := &keySession{}
 	defer sess.close()
 	if !sess.resume() {
@@ -93,7 +99,7 @@ func runMDViewer(ctx *Ctx, path string) error {
 			h = 1
 		}
 		off = clampView(len(lines), off, h)
-		drawViewerFrame(ctx.Out, path, lines, off, h)
+		drawViewerFrame(ctx.Out, path, lines, off, h, onDelete != nil)
 		k, ok := sess.kr.Read()
 		if !ok {
 			break
@@ -129,6 +135,20 @@ func runMDViewer(ctx *Ctx, path string) error {
 			case 'q':
 				quit()
 				return nil
+			case 'x':
+				if onDelete != nil {
+					sess.close()
+					fmt.Fprint(ctx.Out, "\r\x1b[J")
+					del := onDelete()
+					if !sess.resume() {
+						return nil
+					}
+					if del {
+						quit()
+						return nil
+					}
+					lines = loadLines(path) // 未删除（取消/失败），重读重渲染
+				}
 			case 'r':
 				lines = loadLines(path)
 			case 'e', 'o':
@@ -156,9 +176,10 @@ func runMDViewer(ctx *Ctx, path string) error {
 	return nil
 }
 
-// runLargeFile 逾行文件打开方式选择：gs 全屏查阅/编辑 或 TRAE/外部编辑器。
-// 非 TTY 不询问维持旧路；Esc 取消（ErrCancelled 由 REPL 静默）= 放弃本次打开
-func runLargeFile(ctx *Ctx, path string) error {
+func runLargeFile(ctx *Ctx, path string) error { return runLargeFileEx(ctx, path, nil) }
+
+// runLargeFileEx 逾行文件打开方式选择带删除钩子透传；"gs 查阅" 路径传给全屏查阅器
+func runLargeFileEx(ctx *Ctx, path string, onDelete func() bool) error {
 	if _, ok := ui.PageSize(); !ok {
 		fmt.Fprintf(ctx.Out, "长文件：正在调起外部编辑器打开 %s ...（关闭文件后回到 gs）\n", ui.Path(path))
 		return edit.OpenExternal(path, ctx.Cfg)
@@ -175,5 +196,5 @@ func runLargeFile(ctx *Ctx, path string) error {
 		fmt.Fprintf(ctx.Out, "长文件：正在调起外部编辑器打开 %s ...（关闭文件后回到 gs）\n", ui.Path(path))
 		return edit.OpenExternal(path, ctx.Cfg)
 	}
-	return runMDViewer(ctx, path)
+	return runMDViewerEx(ctx, path, onDelete)
 }

@@ -6,20 +6,89 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
 
 	"github.com/bugzi/gs/internal/roadmap"
+	"github.com/bugzi/gs/internal/ui"
 )
 
 type viewKind int
 
 const (
-	viewGlobal viewKind = iota // 全局树：主干 + 展开的知识点
-	viewBranch                 // 主干页：单主干知识点列表
-	viewPoint                  // 知识点详情：spring/river/ship/sea 清单
+	viewGlobal  viewKind = iota // 全局树：主干 + 展开的知识点
+	viewBranch                  // 主干页：单主干知识点列表
+	viewPoint                   // 知识点详情：spring/river/ship/sea 清单
+	viewUnbound                 // 待归类区：五类未挂载文件
 )
+
+// Tier 绑定类型：详情页五清单与待归类区共用；TierNone 表示行不归属任何清单
+type Tier int
+
+const (
+	TierNone Tier = iota
+	TierSea
+	TierShip
+	TierRiver
+	TierSpring
+	TierCode
+)
+
+// tierOrder 待归类区分组顺序
+var tierOrder = []Tier{TierSea, TierShip, TierRiver, TierSpring, TierCode}
+
+// Label 清单标题文案（详情页节标题与待归类区分组共用前缀）
+func (t Tier) Label() string {
+	switch t {
+	case TierSea:
+		return "sea · 来源"
+	case TierShip:
+		return "ship · 加工中"
+	case TierRiver:
+		return "river · 沉淀"
+	case TierSpring:
+		return "spring · 我的总结"
+	case TierCode:
+		return "code · 演示代码"
+	}
+	return ""
+}
+
+// Color 层点缀色（低饱和，与主题金赭沙同亮度带），小节标题按层区分
+func (t Tier) Color() string {
+	switch t {
+	case TierSea:
+		return ui.ANSISea
+	case TierShip:
+		return ui.ANSIShip
+	case TierRiver:
+		return ui.ANSIRiver
+	case TierSpring:
+		return ui.ANSISpring
+	case TierCode:
+		return ui.ANSICode
+	}
+	return ""
+}
+
+// dir 层在 Study/ 下的目录名（笔记行去前缀显示用）
+func (t Tier) dir() string {
+	switch t {
+	case TierSea:
+		return "sea"
+	case TierShip:
+		return "ship"
+	case TierRiver:
+		return "river"
+	case TierSpring:
+		return "spring"
+	case TierCode:
+		return "code"
+	}
+	return ""
+}
 
 type rowKind int
 
@@ -30,6 +99,7 @@ const (
 	rowSectionHead                // 详情页小节标题（不可选）
 	rowNote                       // 笔记路径行（可选，可打开）
 	rowHint                       // 提示行（不可选）
+	rowUnboundHead                // 待归类区入口行（全局树尾，可选）
 )
 
 type row struct {
@@ -37,21 +107,36 @@ type row struct {
 	Branch     int
 	Point      int
 	Note       string // rowNote：绑定路径
+	Tier       Tier   // 行归属的绑定清单；TierNone = 无归属
+	Dim        bool   // rowNote：灰显（sea 已装船/入河，出处已消费）
 	Selectable bool
 	Text       string
 }
 
 // Model 浏览器状态；RM 原地变更，落盘经 Hooks.Save 由壳层回调
 type Model struct {
-	RM       *roadmap.Roadmap
-	Root     string                // 工作区根（失效判断用）
-	Exists   func(rel string) bool // nil = os.Stat 默认实现（测试注入）
-	View     viewKind
-	Branch   int
-	Point    int
-	Cursor   int
-	Expanded map[int]bool
-	Err      string // 底部错误行（落盘失败等），按键后清除
+	RM           *roadmap.Roadmap
+	Root         string                // 工作区根（失效判断用）
+	Exists       func(rel string) bool // nil = os.Stat 默认实现（测试注入）
+	Unbound      func(Tier) []string   // 壳层注入：未挂载扫描（nil = 恒空）
+	unboundCache map[Tier][]string     // 未挂载快照：进入视图/每次落盘后刷新
+	View         viewKind
+	Branch       int
+	Point        int
+	Cursor       int
+	Expanded     map[int]bool
+	Err          string // 底部错误行（落盘失败等），按键后清除
+}
+
+// refreshUnbound 重扫未挂载清单（壳层回调，代价 = 五目录一次遍历）
+func (m *Model) refreshUnbound() {
+	m.unboundCache = map[Tier][]string{}
+	if m.Unbound == nil {
+		return
+	}
+	for _, t := range tierOrder {
+		m.unboundCache[t] = m.Unbound(t)
+	}
 }
 
 // Rows 依当前视图计算可见行
@@ -61,6 +146,8 @@ func (m *Model) Rows() []row {
 		return m.globalRows()
 	case viewBranch:
 		return m.branchRows()
+	case viewUnbound:
+		return m.unboundRows()
 	default:
 		return m.pointRows()
 	}
@@ -84,6 +171,33 @@ func (m *Model) globalRows() []row {
 		}
 		rows = appendPointRows(rows, b, bi, "    ")
 	}
+	// 待归类区：无主文件集中地（反查计算视图，非物理目录）
+	n := 0
+	for _, t := range tierOrder {
+		n += len(m.unboundCache[t])
+	}
+	text := "▸ 待归类区"
+	if n > 0 {
+		text = leader(text, fmt.Sprintf("%d", n))
+	}
+	rows = append(rows, row{Kind: rowUnboundHead, Selectable: true, Text: text})
+	return rows
+}
+
+// unboundRows 待归类区：五类未挂载文件分组列出
+func (m *Model) unboundRows() []row {
+	var rows []row
+	for _, t := range tierOrder {
+		files := m.unboundCache[t]
+		rows = append(rows, row{Kind: rowSectionHead, Tier: t,
+			Text: fmt.Sprintf("%s · 未归类 ×%d", t.Label(), len(files))})
+		for _, rel := range files {
+			rows = append(rows, m.noteRow(t, rel))
+		}
+		if len(files) == 0 {
+			rows = append(rows, row{Kind: rowHint, Tier: t, Text: "  （无）"})
+		}
+	}
 	return rows
 }
 
@@ -104,7 +218,7 @@ func appendPointRows(rows []row, b *roadmap.Branch, bi int, indent string) []row
 			prev = ""
 		}
 		rows = append(rows, row{Kind: rowPoint, Branch: bi, Point: pi, Selectable: true,
-			Text: indent + "  " + roadmap.Glyph(p.Status) + " " + p.Title + star(p.Tags)})
+			Text: indent + "  " + roadmap.Glyph(p.Status) + " " + p.Title})
 	}
 	return rows
 }
@@ -112,48 +226,81 @@ func appendPointRows(rows []row, b *roadmap.Branch, bi int, indent string) []row
 func (m *Model) pointRows() []row {
 	p := m.curPoint()
 	var rows []row
-	rows = append(rows, row{Kind: rowSectionHead, Text: "spring · 我的总结 ×0/1"})
+	rows = append(rows, row{Kind: rowSectionHead, Tier: TierSpring, Text: TierSpring.Label() + " ×0/1"})
 	if p.Spring == "" {
-		rows = append(rows, row{Kind: rowHint, Text: "  （尚未创建，/spring add " + p.Title + " 可创建并绑定）"})
+		rows = append(rows, row{Kind: rowHint, Tier: TierSpring, Text: "  （尚未创建，/spring add " + p.Title + " 可创建并绑定）"})
 	} else {
-		rows = append(rows, m.noteRow(p.Spring))
+		rows = append(rows, m.noteRow(TierSpring, p.Spring))
 	}
-	rows = append(rows, row{Kind: rowSectionHead, Text: "code · 演示代码 ×0/1"})
+	rows = append(rows, row{Kind: rowSectionHead, Tier: TierCode, Text: TierCode.Label() + " ×0/1"})
 	if p.Code == "" {
-		rows = append(rows, row{Kind: rowHint, Text: "  （尚未创建，/code add " + p.Title + " 可创建并绑定）"})
+		rows = append(rows, row{Kind: rowHint, Tier: TierCode, Text: "  （尚未创建，/code add " + p.Title + " 可创建并绑定）"})
 	} else {
-		rows = append(rows, m.noteRow(p.Code))
+		rows = append(rows, m.noteRow(TierCode, p.Code))
 	}
-	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("river · 沉淀 ×%d", len(p.River))})
+	rows = append(rows, row{Kind: rowSectionHead, Tier: TierRiver, Text: fmt.Sprintf("%s ×%d", TierRiver.Label(), len(p.River))})
 	for _, rel := range p.River {
-		rows = append(rows, m.noteRow(rel))
+		rows = append(rows, m.noteRow(TierRiver, rel))
 	}
 	if len(p.River) == 0 {
-		rows = append(rows, row{Kind: rowHint, Text: "  （无；/river move 入河后自动挂载）"})
+		rows = append(rows, row{Kind: rowHint, Tier: TierRiver, Text: "  （无；/ship move 入河后自动挂载）"})
 	}
-	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("ship · 加工中 ×%d", len(p.Ship))})
+	rows = append(rows, row{Kind: rowSectionHead, Tier: TierShip, Text: fmt.Sprintf("%s ×%d", TierShip.Label(), len(p.Ship))})
 	for _, rel := range p.Ship {
-		rows = append(rows, m.noteRow(rel))
+		rows = append(rows, m.noteRow(TierShip, rel))
 	}
 	if len(p.Ship) == 0 {
-		rows = append(rows, row{Kind: rowHint, Text: "  （无；/ship move 装船后开始加工）"})
+		rows = append(rows, row{Kind: rowHint, Tier: TierShip, Text: "  （无；/ship copy 装船后开始加工）"})
 	}
-	rows = append(rows, row{Kind: rowSectionHead, Text: fmt.Sprintf("sea · 来源 ×%d", len(p.Sea))})
-	for _, rel := range p.Sea {
-		rows = append(rows, m.noteRow(rel))
+	rows = append(rows, row{Kind: rowSectionHead, Tier: TierSea, Text: fmt.Sprintf("%s ×%d", TierSea.Label(), len(p.Sea))})
+	for _, rel := range sortedSea(p) {
+		r := m.noteRow(TierSea, rel)
+		r.Dim = seaShipped(p, rel)
+		rows = append(rows, r)
 	}
 	if len(p.Sea) == 0 {
-		rows = append(rows, row{Kind: rowHint, Text: "  （无）"})
+		rows = append(rows, row{Kind: rowHint, Tier: TierSea, Text: "  （无）"})
 	}
 	return rows
 }
 
-func (m *Model) noteRow(rel string) row {
-	text := "  " + rel
+// noteRow 笔记行：Note 保留全路径供打开/卸载；显示文本去 Study/<层>/ 前缀（小节标题已标明层）
+func (m *Model) noteRow(t Tier, rel string) row {
+	text := "  " + strings.TrimPrefix(rel, "Study/"+t.dir()+"/")
 	if !m.exists(rel) {
 		text += "　[失效]"
 	}
-	return row{Kind: rowNote, Note: rel, Selectable: true, Text: text}
+	return row{Kind: rowNote, Note: rel, Tier: t, Selectable: true, Text: text}
+}
+
+// seaShipped 大海条目是否已装船/入河：同名文件已挂在本知识点 ship，或 river 去编号后同名。
+// 两边都做编号归一（StripNumPrefix）：sea 原件常带源编号（1.2.0 xxx），装船/入河后往往
+// 改名去号或领新号（02-xxx），按原始基名比对会漏标；归一后同名即视为同一出处。
+// 与 /sea 选择器的已装船灰显同一约定，出处已消费则弱化显示。
+func seaShipped(p *roadmap.Point, seaRel string) bool {
+	base := roadmap.StripNumPrefix(filepath.Base(seaRel))
+	for _, lists := range [][]string{p.Ship, p.River} {
+		for _, rel := range lists {
+			if roadmap.StripNumPrefix(filepath.Base(rel)) == base {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sortedSea sea 清单排序：未消费在前、已消费（已装船/入河标灰）在后，各自按名升序——
+// 与 /sea 选择器 sortShippedFirst 同一约定，原材料一眼可辨。
+func sortedSea(p *roadmap.Point) []string {
+	sea := append([]string(nil), p.Sea...)
+	sort.Slice(sea, func(i, j int) bool {
+		di, dj := seaShipped(p, sea[i]), seaShipped(p, sea[j])
+		if di != dj {
+			return !di
+		}
+		return sea[i] < sea[j]
+	})
+	return sea
 }
 
 func (m *Model) exists(rel string) bool {
@@ -194,24 +341,22 @@ func (m *Model) Normalize() {
 	}
 }
 
-// Move 光标移动；落在不可选行（分组/小节标题）时沿移动方向找最近可选行，移到头即停
+// Move 光标移动，循环回绕（底→下键回顶、顶→上键到底）：整圈依次探测，落第一个可选行；
+// 沿途不可选行（分组/小节标题）自动跳过；整表无可选行则不动
 func (m *Model) Move(delta int) {
 	rows := m.Rows()
-	c := m.Cursor + delta
-	if c < 0 || c >= len(rows) {
+	n := len(rows)
+	if n == 0 {
 		return
 	}
-	m.Cursor = c
-	if rows[c].Selectable {
-		return
-	}
-	for i := c + delta; i >= 0 && i < len(rows); i += delta {
-		if rows[i].Selectable {
-			m.Cursor = i
+	c := m.Cursor
+	for step := 0; step < n; step++ {
+		c = ((c+delta)%n + n) % n
+		if rows[c].Selectable {
+			m.Cursor = c
 			return
 		}
 	}
-	m.Normalize() // 移动方向无可选行时反向兜底
 }
 
 // Toggle 全局树主干行展开/收起；其余情况无效
@@ -232,6 +377,7 @@ const (
 	ActIntoBranch
 	ActIntoPoint
 	ActOpenNote
+	ActIntoUnbound
 )
 
 // Enter 进入：主干行→主干页；知识点行→详情页；笔记行→打开。返回动作与笔记路径
@@ -253,7 +399,12 @@ func (m *Model) Enter() (Action, string) {
 		m.Point, m.View, m.Cursor = r.Point, viewPoint, 0
 		m.Normalize()
 		return ActIntoPoint, ""
-	case m.View == viewPoint && r.Kind == rowNote:
+	case m.View == viewGlobal && r.Kind == rowUnboundHead:
+		m.refreshUnbound()
+		m.View, m.Cursor = viewUnbound, 0
+		m.Normalize()
+		return ActIntoUnbound, ""
+	case r.Kind == rowNote && (m.View == viewPoint || m.View == viewUnbound):
 		return ActOpenNote, r.Note
 	}
 	return ActNone, ""
@@ -267,6 +418,10 @@ func (m *Model) Back() bool {
 		m.Normalize()
 		return true
 	case viewBranch:
+		m.View, m.Cursor = viewGlobal, 0
+		m.Normalize()
+		return true
+	case viewUnbound:
 		m.View, m.Cursor = viewGlobal, 0
 		m.Normalize()
 		return true
@@ -316,6 +471,29 @@ func (m *Model) rowAt(i int) *row {
 	return &rows[i]
 }
 
+// PointAtCursor 光标所指知识点行（全局树/主干页）
+func (m *Model) PointAtCursor() (roadmap.PointRef, bool) {
+	r := m.rowAt(m.Cursor)
+	if r != nil && r.Kind == rowPoint {
+		return roadmap.PointRef{Branch: r.Branch, Point: r.Point}, true
+	}
+	return roadmap.PointRef{}, false
+}
+
+// curRef 详情页当前知识点
+func (m *Model) curRef() roadmap.PointRef {
+	return roadmap.PointRef{Branch: m.Branch, Point: m.Point}
+}
+
+// TierAtCursor 光标所在清单节（详情页与待归类区的行都带 Tier）
+func (m *Model) TierAtCursor() (Tier, bool) {
+	r := m.rowAt(m.Cursor)
+	if r != nil && r.Tier != TierNone {
+		return r.Tier, true
+	}
+	return TierNone, false
+}
+
 func (m *Model) curPoint() *roadmap.Point {
 	return &m.RM.Branches[m.Branch].Points[m.Point]
 }
@@ -331,15 +509,6 @@ func (m *Model) progress(bi int) (done, total int) {
 }
 
 func open(bi int, expanded map[int]bool) bool { return expanded[bi] }
-
-func star(tags []string) string {
-	for _, tg := range tags {
-		if strings.Contains(tg, "高频") {
-			return " *"
-		}
-	}
-	return ""
-}
 
 // leader 「title ···· progress」，目标总显示宽 40（中点至少 3 个）
 func leader(title, progress string) string {

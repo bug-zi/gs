@@ -33,7 +33,7 @@ func newTestAIState(t *testing.T, events ...string) (*AIState, *workspace.Worksp
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &AIState{Client: c}, &workspace.Workspace{Root: t.TempDir()}, cfg
+	return &AIState{Client: c, AskSea: func() bool { return false }}, &workspace.Workspace{Root: t.TempDir()}, cfg
 }
 
 func TestAITurnDirectAnswer(t *testing.T) {
@@ -49,8 +49,8 @@ func TestAITurnDirectAnswer(t *testing.T) {
 	if st.Hist[1].Content != "直接回答" {
 		t.Fatalf("hist=%q", st.Hist[1].Content)
 	}
-	if !strings.Contains(out.String(), "直接回答") {
-		t.Fatalf("应流式输出回答: %s", out.String())
+	if !strings.Contains(stripANSI(out.String()), "直接回答") {
+		t.Fatalf("回答应整段渲染输出: %s", out.String())
 	}
 }
 
@@ -69,11 +69,67 @@ func TestAITurnToolLoop(t *testing.T) {
 	if !strings.Contains(out.String(), "· read_file") {
 		t.Fatalf("应打印工具步骤行: %s", out.String())
 	}
-	if !strings.Contains(out.String(), "文件内容是 hello") {
-		t.Fatalf("应流式输出最终回答: %s", out.String())
+	if !strings.Contains(stripANSI(out.String()), "文件内容是 hello") {
+		t.Fatalf("最终回答应整段渲染输出: %s", out.String())
 	}
 	if len(st.Hist) != 2 {
 		t.Fatalf("Hist 应只存两条，不含工具中间消息: %+v", st.Hist)
+	}
+}
+
+func TestAITurnSeaPromptYes(t *testing.T) {
+	// 确认后触发存档：httptest handler 对分类请求重放同一事件（回复=回答原文），
+	// 解析不出 JSON → 兜底未分类
+	st, ws, cfg := newTestAIState(t, "data: {\"choices\":[{\"delta\":{\"content\":\"回答内容\"}}]}\n\n")
+	asked := false
+	st.AskSea = func() bool { asked = true; return true }
+	var out bytes.Buffer
+	ctx := &Ctx{WS: ws, Cfg: cfg, Out: &out}
+	if err := AITurn(ctx, st, "问"); err != nil {
+		t.Fatal(err)
+	}
+	if !asked {
+		t.Fatal("答毕应触发 sea 询问")
+	}
+	if _, err := os.Stat(filepath.Join(ws.SeaDir(), "未分类")); err != nil {
+		t.Fatalf("应落入未分类: %v", err)
+	}
+	if !strings.Contains(out.String(), "已存入") {
+		t.Fatalf("应打印结果行: %s", out.String())
+	}
+	if len(st.Hist) != 2 {
+		t.Fatalf("存档不应改写 Hist: %+v", st.Hist)
+	}
+}
+
+func TestHistoryText(t *testing.T) {
+	st := &AIState{Hist: []ai.Message{
+		{Role: "user", Content: "iota 是什么"},
+		{Role: "assistant", Content: "**iota** 是常量计数器"},
+		{Role: "user", Content: "slice 怎么扩容"},
+		{Role: "assistant", Content: "翻倍增长"},
+	}}
+	s := historyText(st)
+	if !strings.Contains(s, "会话回顾 · 2 轮") {
+		t.Fatalf("标题轮数缺失: %s", s)
+	}
+	if !strings.Contains(s, "1. 问") || !strings.Contains(s, "iota 是什么") || !strings.Contains(s, "**iota** 是常量计数器") {
+		t.Fatalf("第 1 轮缺失: %s", s)
+	}
+	if !strings.Contains(s, "2. 问") || !strings.Contains(s, "翻倍增长") {
+		t.Fatalf("第 2 轮缺失: %s", s)
+	}
+}
+
+func TestAIHistoryViewEmpty(t *testing.T) {
+	ws := wsForTest(t)
+	var out strings.Builder
+	ctx := &Ctx{WS: ws, Out: &out}
+	if err := AIHistoryView(ctx, &AIState{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stripANSI(out.String()), "本轮还没有对话") {
+		t.Fatalf("应提示空会话: %s", out.String())
 	}
 }
 

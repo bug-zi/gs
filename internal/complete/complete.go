@@ -7,6 +7,8 @@ type Result struct {
 	Ghost      string   // 可接受续写（Tab/→ 上屏）；空 = 无
 	Candidates []string // 面板候选；空 = 不弹
 	Hint       string   // 面板顶部参数提示；空 = 无
+	Single     string   // 首词唯一命中的正式命令名（含精确命中）；空 = 无
+	SingleHint string   // Single 对应命令的参数提示
 }
 
 // For 计算输入行的补全状态。匹配大小写不敏感；
@@ -24,7 +26,12 @@ func For(tree Tree, line string) Result {
 	if len(fields) == 1 {
 		cands := matchNames(tree, first)
 		if len(cands) == 1 {
-			return Result{Ghost: ghostOf(cands[0], first)}
+			res := Result{Ghost: ghostOf(cands[0], first)}
+			if cmd := findCmd(tree, cands[0]); cmd != nil { // 别名候选归一到正式名
+				res.Single = cmd.Name
+				res.SingleHint = cmd.Hint
+			}
+			return res
 		}
 		if len(cands) > 1 {
 			return Result{Candidates: cands}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bugzi/gs/internal/structure"
+	"github.com/bugzi/gs/internal/ui"
 	"github.com/bugzi/gs/internal/workspace"
 )
 
@@ -106,14 +107,14 @@ func TestTreeWindow(t *testing.T) {
 
 func TestRenderRowStyles(t *testing.T) {
 	r := treeRow{head: "├── ▸ web/", desc: "前端页面", notes: 2}
-	if s := renderRow(r, true, 100); !strings.Contains(s, "\x1b[7m") || strings.Contains(s, "\x1b[2m") {
-		t.Fatalf("光标行应整行反白且无内嵌灰: %q", s)
+	if s := renderRow(r, true, 100); !strings.Contains(s, ui.ANSISelBg) || strings.Contains(s, "\x1b[2m") {
+		t.Fatalf("光标行应微底亮字且无内嵌灰: %q", s)
 	}
-	if s := renderRow(r, false, 100); strings.Contains(s, "\x1b[7m") || !strings.Contains(s, "前端页面") || !strings.Contains(s, "·笔2") {
-		t.Fatalf("普通行应含介绍/笔记且无反白: %q", s)
+	if s := renderRow(r, false, 100); strings.Contains(s, ui.ANSISelBg) || !strings.Contains(s, "前端页面") || !strings.Contains(s, "·笔2") {
+		t.Fatalf("普通行应含介绍/笔记且无选中底: %q", s)
 	}
 	// 超宽降级素文本截断
-	if s := renderRow(r, true, 5); strings.Contains(s, "\x1b[7m") {
+	if s := renderRow(r, true, 5); strings.Contains(s, ui.ANSISelBg) {
 		t.Fatalf("超宽行应为素文本截断: %q", s)
 	}
 }

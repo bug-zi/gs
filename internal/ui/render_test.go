@@ -4,6 +4,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 var ansiRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
@@ -51,5 +54,19 @@ func TestRenderGo(t *testing.T) {
 	out := RenderGo("package main\n\nfunc main() {}\n")
 	if !strings.Contains(out, "package") || !strings.Contains(out, "\x1b[") {
 		t.Fatalf("应带 ANSI 高亮输出源码: %q", out)
+	}
+}
+
+func TestSemanticHelpers(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256) // 测试环境非 TTY，lipgloss 默认退化为无色，强制 256 色
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+	if s := Gold("gs"); !strings.Contains(s, "220") || !strings.Contains(s, "gs") {
+		t.Fatalf("Gold 应含 220 与原文: %q", s)
+	}
+	if s := Label("目标"); !strings.Contains(s, "179") {
+		t.Fatalf("Label 应含 179: %q", s)
+	}
+	if s := OK("已保存"); !strings.Contains(s, "144") {
+		t.Fatalf("OK 应含 144: %q", s)
 	}
 }

@@ -1,6 +1,10 @@
 package roadmap
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestStripNumPrefix(t *testing.T) {
 	cases := map[string]string{
@@ -92,5 +96,39 @@ func TestBuildRenumberPlan(t *testing.T) {
 		if got[from] != to {
 			t.Errorf("%s → %s, want %s", from, got[from], to)
 		}
+	}
+}
+
+func TestBuildUnmountMoves(t *testing.T) {
+	rels := []string{
+		"Study/river/01-a/01-x.md",
+		"Study/river/99-未挂载/dup.md",
+	}
+	moves := BuildUnmountMoves(rels, []string{"dup.md"})
+	if len(moves) != 2 {
+		t.Fatalf("moves = %v", moves)
+	}
+	if moves[0].To != "Study/river/99-未挂载/01-x.md" {
+		t.Fatalf("moves[0] = %v", moves[0])
+	}
+	if moves[1].To != "Study/river/99-未挂载/dup.1.md" {
+		t.Fatalf("撞名应顺延 .1，got %v", moves[1])
+	}
+}
+
+func TestListUnmounted(t *testing.T) {
+	root := t.TempDir()
+	if got := ListUnmounted(root); got != nil {
+		t.Fatalf("目录缺失应返回 nil，got %v", got)
+	}
+	dir := filepath.Join(root, RiverDirRel, UnmountedDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "a.md"), []byte("# A\n"), 0o644)
+	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
+	got := ListUnmounted(root)
+	if len(got) != 1 || got[0] != "a.md" {
+		t.Fatalf("ListUnmounted = %v（子目录不应计入）", got)
 	}
 }
